@@ -71,14 +71,15 @@ The app includes a simple fallback avatar (geometric shapes) that works without 
 
 Due to browser security restrictions, you need to run a local server:
 
-**Python:**
+**Node.js (Recommended):**
 ```bash
-python -m http.server 8000
+npm install
+npm start
 ```
 
-**Node.js:**
+**Alternative - Simple Server:**
 ```bash
-npx serve .
+npx serve . -p 8000
 ```
 
 **Live Server (VS Code):**

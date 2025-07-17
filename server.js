@@ -13,16 +13,21 @@ app.use(helmet({
         directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.babylonjs.com", "https://cdn.jsdelivr.net"],
+            scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "blob:", "https:"],
             connectSrc: ["'self'", "https:", "wss:"],
             fontSrc: ["'self'", "https:", "data:"],
             objectSrc: ["'none'"],
-            mediaSrc: ["'self'", "blob:"],
+            mediaSrc: ["'self'", "blob:", "mediastream:"],
             frameSrc: ["'none'"],
         },
     },
-    crossOriginEmbedderPolicy: false // Required for camera access
+    crossOriginEmbedderPolicy: false, // Required for camera access
+    permissionsPolicy: {
+        camera: ["'self'"],
+        microphone: ["'self'"]
+    }
 }));
 
 // Enable CORS for all routes

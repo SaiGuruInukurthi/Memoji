@@ -81,7 +81,7 @@ echo    - Create and download avatar as avatar.glb
 echo    - Place in avatars/ folder
 echo.
 echo 2. Start local server:
-echo    python -m http.server 8000
+echo    npm start
 echo.
 echo 3. Open browser:
 echo    http://localhost:8000

@@ -7,7 +7,7 @@ This guide will walk you through setting up your Memoji-Style Face Puppet app st
 - **Modern web browser** (Chrome, Firefox, Safari, Edge)
 - **Camera access** (built-in or external webcam)
 - **Internet connection** (for downloading models and dependencies)
-- **Local server capability** (Python, Node.js, or VS Code Live Server)
+- **Node.js** (recommended) or alternative local server
 
 ## 🗂️ Project Structure Setup
 
@@ -133,35 +133,37 @@ If you have FBX, OBJ, or other formats:
 
 Web browsers require a local server for camera access and file loading.
 
-### Option A: Python (Most Common)
+### Option A: Node.js Express Server (Recommended)
 
-**Python 3:**
+**Install and start the optimized server:**
 ```cmd
 cd "c:\face-avatar-app\Final face app"
-python -m http.server 8000
+npm install
+npm start
 ```
 
-**Python 2:**
-```cmd
-cd "c:\face-avatar-app\Final face app"
-python -m SimpleHTTPServer 8000
-```
+**Features:**
+- Enhanced security headers for camera access
+- Gzip compression for faster loading
+- Error handling and diagnostics
+- API endpoints for health monitoring
+- Optimized for face tracking applications
 
 **Access**: http://localhost:8000
 
-### Option B: Node.js
+### Option B: Simple Node.js Server
 
 **With npx (Node.js 8+):**
 ```cmd
 cd "c:\face-avatar-app\Final face app"
-npx serve .
+npx serve . -p 8000
 ```
 
 **With live-server:**
 ```cmd
 npm install -g live-server
 cd "c:\face-avatar-app\Final face app"
-live-server
+live-server --port=8000
 ```
 
 ### Option C: VS Code Live Server

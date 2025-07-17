@@ -21,10 +21,11 @@ Your complete Memoji-style face puppet application with:
 
 ### Step 2: Start Local Server  
 ```cmd
-# Run this in your project folder:
-.\start-server.bat
+# Install dependencies and start optimized server:
+npm install
+npm start
 ```
-*Or manually: `python -m http.server 8000`*
+*Or simple server: `npx serve . -p 8000`*
 
 ### Step 3: Open in Browser
 Navigate to: **http://localhost:8000**

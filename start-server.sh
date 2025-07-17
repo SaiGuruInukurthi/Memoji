@@ -34,8 +34,8 @@ else
     echo "Please install Node.js from: https://nodejs.org/download"
     echo
     echo "Alternative options:"
-    echo "1. Use Python if available:"
-    echo "   python3 -m http.server 8000"
+    echo "1. Use simple serve command:"
+    echo "   npx serve . -p 8000"
     echo
     echo "2. Use VS Code with Live Server extension:"
     echo "   - Install 'Live Server' extension"

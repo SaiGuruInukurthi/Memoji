@@ -4,7 +4,7 @@ echo     Testing Memoji Face Puppet App
 echo ========================================
 echo.
 
-echo Starting HTTP server on port 8000...
+echo Starting Node.js server on port 8000...
 echo.
 echo Once the server starts:
 echo 1. Open your browser
@@ -15,4 +15,9 @@ echo.
 echo Press Ctrl+C to stop the server when done.
 echo.
 
-python -m http.server 8000
+if exist package.json (
+    npm install --silent
+    npm start
+) else (
+    npx serve . -p 8000
+)

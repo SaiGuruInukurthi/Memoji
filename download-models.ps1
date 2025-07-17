@@ -65,7 +65,7 @@ Write-Host "   - Create and download avatar as avatar.glb" -ForegroundColor Gray
 Write-Host "   - Place in avatars/ folder" -ForegroundColor Gray
 Write-Host ""
 Write-Host "2. Start local server:" -ForegroundColor White
-Write-Host "   python -m http.server 8000" -ForegroundColor Gray
+Write-Host "   npm start" -ForegroundColor Gray
 Write-Host ""
 Write-Host "3. Open browser:" -ForegroundColor White
 Write-Host "   http://localhost:8000" -ForegroundColor Gray

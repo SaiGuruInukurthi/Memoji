@@ -93,7 +93,7 @@ The app includes a fallback avatar made of simple shapes that will work if you d
 
 After placing your avatar:
 
-1. Start the server: `python -m http.server 8000`
+1. Start the server: `npm start`
 2. Open: http://localhost:8000
 3. Click "Start Camera"
 4. Make facial expressions to test avatar response

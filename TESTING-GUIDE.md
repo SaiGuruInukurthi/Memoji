@@ -22,9 +22,10 @@
 ### **Step 1: Start the Server**
 ```cmd
 cd "c:\face-avatar-app\Final face app"
-.\test-app.bat
+npm install
+npm start
 ```
-*Or manually: `python -m http.server 8000`*
+*Or simple server: `npx serve . -p 8000`*
 
 ### **Step 2: Open Browser**
 - Navigate to: **http://localhost:8000**

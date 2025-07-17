@@ -11,9 +11,10 @@
 
 1. **Start the Server:**
    ```cmd
-   python -m http.server 8000
+   npm install
+   npm start
    ```
-   *Or double-click: `start-server.bat`*
+   *Or simple server: `npx serve . -p 8000`*
 
 2. **Open Browser:**
    Navigate to: **http://localhost:8000**

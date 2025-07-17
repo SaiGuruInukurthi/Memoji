@@ -653,22 +653,43 @@ class FacePuppetApp {
             }
 
             this.updateStatus('📷 Starting camera...', 'loading');
+            
+            // Check if getUserMedia is available
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Camera API not available. Please use HTTPS or localhost.');
+            }
+            
+            console.log('🔍 Requesting camera access...');
+            console.log('🌐 Current URL:', window.location.href);
+            console.log('🔒 Is secure context:', window.isSecureContext);
 
-            const stream = await navigator.mediaDevices.getUserMedia({
+            const constraints = {
                 video: {
                     width: { ideal: 640 },
                     height: { ideal: 480 },
                     facingMode: 'user'
                 }
-            });
+            };
+            
+            console.log('📊 Camera constraints:', constraints);
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            
+            console.log('✅ Camera stream obtained:', stream);
+            console.log('📹 Stream tracks:', stream.getTracks().map(track => `${track.kind}: ${track.label}`));
 
             this.video.srcObject = stream;
             
-            return new Promise((resolve) => {
-                this.video.addEventListener('loadedmetadata', () => {
+            return new Promise((resolve, reject) => {
+                const onLoadedMetadata = () => {
+                    console.log('📺 Video metadata loaded');
+                    console.log(`📐 Video dimensions: ${this.video.videoWidth}x${this.video.videoHeight}`);
+                    
                     // Setup overlay canvas
                     this.overlayCanvas.width = this.video.videoWidth;
                     this.overlayCanvas.height = this.video.videoHeight;
+                    
+                    console.log(`🎨 Overlay canvas set to: ${this.overlayCanvas.width}x${this.overlayCanvas.height}`);
                     
                     this.updateStatus('✅ Camera started! Face tracking active.', 'ready');
                     this.isTracking = true;
@@ -693,13 +714,50 @@ class FacePuppetApp {
                     // Initialize slider values to current camera position
                     this.updateSliderValues();
                     
+                    console.log('🎉 Camera initialization complete!');
                     resolve();
-                });
+                };
+                
+                const onError = (error) => {
+                    console.error('❌ Video element error:', error);
+                    reject(new Error('Video element failed to load: ' + error.message));
+                };
+                
+                // Set up event listeners
+                this.video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+                this.video.addEventListener('error', onError, { once: true });
+                
+                // Set a timeout in case loadedmetadata never fires
+                setTimeout(() => {
+                    if (!this.isTracking) {
+                        console.warn('⚠️ Video metadata loading timeout');
+                        reject(new Error('Camera initialization timeout'));
+                    }
+                }, 10000); // 10 second timeout
             });
 
         } catch (error) {
-            console.error('Camera error:', error);
-            this.updateStatus('❌ Camera access failed: ' + error.message, 'error');
+            console.error('❌ Camera error:', error);
+            
+            // Enhanced error messages
+            let errorMessage = error.message;
+            if (error.name === 'NotAllowedError') {
+                errorMessage = 'Camera permission denied. Please allow camera access and reload the page.';
+            } else if (error.name === 'NotFoundError') {
+                errorMessage = 'No camera found. Please connect a camera and try again.';
+            } else if (error.name === 'NotReadableError') {
+                errorMessage = 'Camera is already in use by another application. Please close other apps and try again.';
+            } else if (error.name === 'OverconstrainedError') {
+                errorMessage = 'Camera does not meet the required specifications. Try a different camera.';
+            } else if (error.name === 'SecurityError') {
+                errorMessage = 'Camera access blocked by security policy. Please use HTTPS or localhost.';
+            }
+            
+            this.updateStatus('❌ Camera access failed: ' + errorMessage, 'error');
+            
+            // Reset button state
+            document.getElementById('startBtn').textContent = '🎬 Start Camera';
+            document.getElementById('startBtn').onclick = () => this.startCamera();
         }
     }
 
@@ -2821,6 +2879,99 @@ function checkMorphTargets() {
         return window.app.analyzeMorphTargets();
     } else {
         console.log('❌ App or avatar not available');
+    }
+}
+
+// Camera diagnostics function
+function diagnoseCameraIssues() {
+    console.log('🔍 === CAMERA DIAGNOSTICS ===');
+    
+    // Check browser support
+    console.log('🌐 Browser info:');
+    console.log('  - User Agent:', navigator.userAgent);
+    console.log('  - Is secure context:', window.isSecureContext);
+    console.log('  - Current URL:', window.location.href);
+    console.log('  - Protocol:', window.location.protocol);
+    
+    // Check API availability
+    console.log('📡 API availability:');
+    console.log('  - navigator.mediaDevices:', !!navigator.mediaDevices);
+    console.log('  - getUserMedia:', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    console.log('  - enumerateDevices:', !!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices));
+    
+    // Check permissions if available
+    if (navigator.permissions) {
+        navigator.permissions.query({name: 'camera'}).then(result => {
+            console.log('🔒 Camera permission:', result.state);
+        }).catch(err => {
+            console.log('🔒 Camera permission check failed:', err.message);
+        });
+    } else {
+        console.log('🔒 Permissions API not available');
+    }
+    
+    // List available devices
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        navigator.mediaDevices.enumerateDevices().then(devices => {
+            console.log('📷 Available devices:');
+            devices.forEach((device, index) => {
+                console.log(`  ${index + 1}. ${device.kind}: ${device.label || 'Unnamed'} (${device.deviceId.substring(0, 8)}...)`);
+            });
+            
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            console.log(`📊 Total video devices: ${videoDevices.length}`);
+        }).catch(err => {
+            console.log('❌ Could not enumerate devices:', err.message);
+        });
+    }
+    
+    // Test basic camera access
+    console.log('🧪 Testing basic camera access...');
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                console.log('✅ Basic camera test PASSED');
+                console.log('📹 Stream info:', {
+                    active: stream.active,
+                    id: stream.id,
+                    tracks: stream.getTracks().length
+                });
+                
+                // Clean up test stream
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(err => {
+                console.log('❌ Basic camera test FAILED:', err.name, err.message);
+                
+                // Provide specific help based on error type
+                switch(err.name) {
+                    case 'NotAllowedError':
+                        console.log('💡 Solution: Grant camera permission in browser settings');
+                        break;
+                    case 'NotFoundError':
+                        console.log('💡 Solution: Connect a camera or check device connections');
+                        break;
+                    case 'NotReadableError':
+                        console.log('💡 Solution: Close other apps using the camera');
+                        break;
+                    case 'SecurityError':
+                        console.log('💡 Solution: Use HTTPS or localhost URL');
+                        break;
+                    default:
+                        console.log('💡 Solution: Try refreshing the page or using a different browser');
+                }
+            });
+    }
+    
+    // Check app state
+    if (window.app) {
+        console.log('🎭 App state:');
+        console.log('  - Initialized:', window.app.isInitialized);
+        console.log('  - Tracking:', window.app.isTracking);
+        console.log('  - Video element:', !!window.app.video);
+        console.log('  - Canvas element:', !!window.app.canvas);
+    } else {
+        console.log('❌ App not available - page may not be fully loaded');
     }
 }
 
