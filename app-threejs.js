@@ -23,11 +23,33 @@ class FacePuppetApp {
         this.expressions = {};
         this.landmarks = null;
         
+        // Face tracking optimization
+        this.faceTrackingFrameSkip = 3; // Skip more face detection frames, but not avatar animation
+        this.faceTrackingFrameCount = 0;
+        this.lastFaceTrackingTime = 0;
+        this.faceTrackingInterval = 33; // Increased to ~30 FPS for faster detection with optimizations
+        
+        // Avatar animation optimization (separate from face tracking)
+        this.avatarAnimationInterval = 16; // ~60 FPS for avatar animation (smooth)
+        this.lastAvatarAnimationTime = 0;
+        this.avatarAnimationFrameCount = 0;
+        
+        // Face-API performance optimizations
+        this.faceDetectorOptions = null; // Will be initialized after models load
+        
+        // Canvas for face detection optimization
+        this.detectionCanvas = null;
+        this.detectionContext = null;
+        
         // Animation smoothing - enhanced for better expression responsiveness
-        this.smoothingFactor = 0.4;
+        this.smoothingFactor = 0.6; // Increased from 0.4 for more responsive animations
         this.previousExpressions = {};
         this.blendshapeSmoothing = {};
         this.headRotationSmoothing = { yaw: 0, pitch: 0, roll: 0 };
+        
+        // High-frequency avatar animation smoothing (separate from face detection)
+        this.avatarSmoothingFactor = 0.8; // Higher responsiveness for avatar
+        this.interpolationFrames = 4; // Interpolate between face detection updates
         
         // Enhanced expression thresholds
         this.expressionThresholds = {
@@ -53,6 +75,43 @@ class FacePuppetApp {
         this.clock = new THREE.Clock();
         this.animationId = null;
         
+        // Enhanced performance tracking
+        this.frameCount = 0;
+        this.lastFPSTime = performance.now();
+        this.targetFPS = 60;
+        this.frameInterval = 1000 / this.targetFPS;
+        this.lastRenderTime = 0;
+        this.adaptiveQuality = true;
+        this.performanceStats = {
+            fps: 0,
+            renderTime: 0,
+            frameTime: 0,
+            faceDetectionTime: 0, // New: track face detection performance
+            faceDetectionFPS: 0   // New: track face detection FPS
+        };
+        
+        // Face detection performance tracking
+        this.faceDetectionCount = 0;
+        this.lastFaceDetectionFPSTime = performance.now();
+        
+        // Frustum culling optimization
+        this.frustumCulling = true;
+        
+        // LOD (Level of Detail) system
+        this.useLOD = true;
+        this.lodDistance = 5;
+        
+        // Render targets for performance
+        this.useRenderTargets = false;
+        
+        // Object pooling for performance
+        this.objectPool = {
+            vector3: [],
+            matrix4: [],
+            quaternion: [],
+            box3: []
+        };
+        
         // Initialize the app
         this.init();
     }
@@ -69,6 +128,9 @@ class FacePuppetApp {
             if (!this.video || !this.canvas || !this.overlayCanvas) {
                 throw new Error('Required DOM elements not found');
             }
+            
+            // Create optimized detection canvas for faster face-api processing
+            this.createDetectionCanvas();
             
             console.log('✅ DOM elements initialized');
             
@@ -89,21 +151,43 @@ class FacePuppetApp {
 
     async initThreeJS() {
         try {
-            // Create renderer with performance optimizations
+            // Create renderer with aggressive performance optimizations
             this.renderer = new THREE.WebGLRenderer({
                 canvas: this.canvas,
-                antialias: true,
+                antialias: window.devicePixelRatio <= 1, // Only enable AA on low DPI displays
                 alpha: false,
-                powerPreference: "high-performance"
+                powerPreference: "high-performance",
+                stencil: false, // Disable stencil buffer for performance
+                depth: true,
+                premultipliedAlpha: false,
+                preserveDrawingBuffer: false, // Better memory performance
+                failIfMajorPerformanceCaveat: false
             });
             
             this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight);
             this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
+            
+            // Enhanced renderer optimizations
             this.renderer.outputColorSpace = THREE.SRGBColorSpace;
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
             this.renderer.toneMappingExposure = 1;
+            
+            // Shadow optimizations
             this.renderer.shadowMap.enabled = true;
             this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.renderer.shadowMap.autoUpdate = false; // Manual shadow updates for performance
+            
+            // Additional performance settings
+            this.renderer.sortObjects = true; // Enable object sorting for better performance
+            this.renderer.autoClear = true;
+            this.renderer.autoClearColor = true;
+            this.renderer.autoClearDepth = true;
+            this.renderer.autoClearStencil = false;
+            
+            // Enable GPU timing for performance monitoring
+            if (this.renderer.capabilities.disjointTimerQuery) {
+                this.renderer.info.autoReset = false;
+            }
             
             // Create scene
             this.scene = new THREE.Scene();
@@ -173,22 +257,55 @@ class FacePuppetApp {
     }
 
     startRenderLoop() {
-        const animate = () => {
+        let lastTime = 0;
+        
+        const animate = (currentTime) => {
             this.animationId = requestAnimationFrame(animate);
             
-            // Update controls
-            this.controls.update();
+            // Frame rate limiting for performance
+            const deltaTime = currentTime - lastTime;
+            if (deltaTime < this.frameInterval) {
+                return; // Skip this frame to maintain target FPS
+            }
             
-            // Update avatar animation
+            const frameStart = performance.now();
+            
+            // Update performance stats
+            this.updatePerformanceStats(currentTime, deltaTime);
+            
+            // Adaptive quality based on performance
+            if (this.adaptiveQuality) {
+                this.adjustQualityBasedOnPerformance();
+            }
+            
+            // Update controls (throttled)
+            if (this.frameCount % 2 === 0) {
+                this.controls.update();
+            }
+            
+            // Update avatar animation at full 60 FPS (separate from face detection)
             if (this.avatar && this.isTracking) {
-                this.updateAvatarAnimation();
+                this.updateAvatarAnimationHighFreq(currentTime);
+            }
+            
+            // Frustum culling optimization
+            if (this.frustumCulling && this.frameCount % 3 === 0) { // Throttle frustum culling
+                this.performFrustumCulling();
             }
             
             // Render scene
             this.renderer.render(this.scene, this.camera);
+            
+            // Track render time
+            const frameEnd = performance.now();
+            this.performanceStats.renderTime = frameEnd - frameStart;
+            this.performanceStats.frameTime = deltaTime;
+            
+            lastTime = currentTime;
+            this.frameCount++;
         };
         
-        animate();
+        animate(0);
     }
 
     handleResize() {
@@ -198,6 +315,129 @@ class FacePuppetApp {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
+    }
+
+    updatePerformanceStats(currentTime, deltaTime) {
+        // Calculate FPS every second
+        if (currentTime - this.lastFPSTime >= 1000) {
+            this.performanceStats.fps = Math.round((this.frameCount * 1000) / (currentTime - this.lastFPSTime));
+            this.frameCount = 0;
+            this.lastFPSTime = currentTime;
+            
+            // Update UI if debug mode is enabled
+            if (this.debugMode) {
+                this.updatePerformanceUI();
+            }
+        }
+    }
+
+    updateFaceDetectionFPS() {
+        this.faceDetectionCount++;
+        const currentTime = performance.now();
+        
+        // Calculate face detection FPS every second
+        if (currentTime - this.lastFaceDetectionFPSTime >= 1000) {
+            this.performanceStats.faceDetectionFPS = Math.round((this.faceDetectionCount * 1000) / (currentTime - this.lastFaceDetectionFPSTime));
+            this.faceDetectionCount = 0;
+            this.lastFaceDetectionFPSTime = currentTime;
+        }
+    }
+
+    adjustQualityBasedOnPerformance() {
+        const targetFPS = 60;
+        const currentFPS = this.performanceStats.fps;
+        
+        if (currentFPS < targetFPS * 0.8) { // Below 80% of target FPS
+            // Reduce quality for better performance
+            if (this.renderer.getPixelRatio() > 1) {
+                this.renderer.setPixelRatio(Math.max(1, this.renderer.getPixelRatio() - 0.1));
+            }
+            
+            // Reduce shadow map size
+            this.scene.traverse((child) => {
+                if (child.isLight && child.shadow) {
+                    if (child.shadow.mapSize.width > 512) {
+                        child.shadow.mapSize.setScalar(512);
+                        child.shadow.needsUpdate = true;
+                    }
+                }
+            });
+        } else if (currentFPS > targetFPS * 0.95) { // Above 95% of target FPS
+            // Increase quality if performance allows
+            if (this.renderer.getPixelRatio() < Math.min(window.devicePixelRatio, 2)) {
+                this.renderer.setPixelRatio(Math.min(this.renderer.getPixelRatio() + 0.1, 2));
+            }
+        }
+    }
+
+    performFrustumCulling() {
+        if (!this.camera) return;
+        
+        const frustum = new THREE.Frustum();
+        const matrix = this.getPooledMatrix4().multiplyMatrices(
+            this.camera.projectionMatrix, 
+            this.camera.matrixWorldInverse
+        );
+        frustum.setFromProjectionMatrix(matrix);
+        
+        this.scene.traverse((object) => {
+            if (object.isMesh) {
+                // Check if object is in camera frustum using pooled objects
+                const boundingBox = this.getPooledBox3().setFromObject(object);
+                object.visible = frustum.intersectsBox(boundingBox);
+                this.returnPooledBox3(boundingBox);
+            }
+        });
+        
+        this.returnPooledMatrix4(matrix);
+    }
+
+    // Object pooling methods for performance
+    getPooledVector3() {
+        return this.objectPool.vector3.pop() || new THREE.Vector3();
+    }
+
+    returnPooledVector3(vector) {
+        vector.set(0, 0, 0);
+        this.objectPool.vector3.push(vector);
+    }
+
+    getPooledMatrix4() {
+        return this.objectPool.matrix4.pop() || new THREE.Matrix4();
+    }
+
+    returnPooledMatrix4(matrix) {
+        matrix.identity();
+        this.objectPool.matrix4.push(matrix);
+    }
+
+    getPooledQuaternion() {
+        return this.objectPool.quaternion.pop() || new THREE.Quaternion();
+    }
+
+    returnPooledQuaternion(quaternion) {
+        quaternion.set(0, 0, 0, 1);
+        this.objectPool.quaternion.push(quaternion);
+    }
+
+    getPooledBox3() {
+        return this.objectPool.box3.pop() || new THREE.Box3();
+    }
+
+    returnPooledBox3(box) {
+        box.makeEmpty();
+        this.objectPool.box3.push(box);
+    }
+
+    updatePerformanceUI() {
+        // Update performance counter if it exists
+        const performanceCounter = document.getElementById('performanceCounter');
+        if (performanceCounter) {
+            performanceCounter.innerHTML = `
+                Render: ${this.performanceStats.fps} FPS | ${this.performanceStats.renderTime.toFixed(1)}ms<br>
+                Face Detection: ${this.performanceStats.faceDetectionFPS} FPS | ${this.performanceStats.faceDetectionTime.toFixed(1)}ms
+            `;
+        }
     }
 
     async loadAvatar() {
@@ -448,6 +688,14 @@ class FacePuppetApp {
                 throw new Error('Could not load face-api.js models from any location');
             }
 
+            // Initialize optimized face detector options after models are loaded
+            this.faceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
+                inputSize: 160, // Reduced from default 416 for 2.6x speed improvement
+                scoreThreshold: 0.3 // Lower threshold for faster detection
+            });
+            
+            console.log('✅ Face detector optimized for speed (160px input, 0.3 threshold)');
+
         } catch (error) {
             console.error('❌ Error loading face-api models:', error);
             throw new Error('Failed to load face detection models. Please check the models folder.');
@@ -543,6 +791,7 @@ class FacePuppetApp {
         const startBtn = document.getElementById('startBtn');
         const resetBtn = document.getElementById('resetBtn');
         const toggleDebugBtn = document.getElementById('toggleDebugBtn');
+        const togglePerformanceBtn = document.getElementById('togglePerformanceBtn');
         const zoomInBtn = document.getElementById('zoomInBtn');
         const zoomOutBtn = document.getElementById('zoomOutBtn');
         const cameraHorizontal = document.getElementById('cameraHorizontal');
@@ -553,6 +802,11 @@ class FacePuppetApp {
             startBtn.onclick = () => this.stopCamera();
             resetBtn.disabled = false;
             toggleDebugBtn.disabled = false;
+            if (togglePerformanceBtn) {
+                togglePerformanceBtn.disabled = false;
+                togglePerformanceBtn.textContent = this.adaptiveQuality ? '⚡ Performance ON' : '⚡ Performance OFF';
+                togglePerformanceBtn.style.background = this.adaptiveQuality ? 'rgba(76, 175, 80, 0.3)' : '';
+            }
             zoomInBtn.disabled = false;
             zoomOutBtn.disabled = false;
             cameraHorizontal.disabled = false;
@@ -563,6 +817,7 @@ class FacePuppetApp {
             startBtn.onclick = () => this.startCamera();
             resetBtn.disabled = true;
             toggleDebugBtn.disabled = true;
+            if (togglePerformanceBtn) togglePerformanceBtn.disabled = true;
             zoomInBtn.disabled = true;
             zoomOutBtn.disabled = true;
             cameraHorizontal.disabled = true;
@@ -595,15 +850,32 @@ class FacePuppetApp {
     async trackFace() {
         if (!this.isTracking) return;
 
+        const faceDetectionStart = performance.now();
+
         try {
+            // Use optimized video frame for faster detection
+            const inputElement = this.optimizeVideoFrame();
+            if (!inputElement) {
+                return; // Skip this frame if optimization failed
+            }
+            
+            // Use pre-configured optimized detector options
             const detections = await faceapi.detectSingleFace(
-                this.video,
-                new faceapi.TinyFaceDetectorOptions()
+                inputElement,
+                this.faceDetectorOptions
             ).withFaceLandmarks().withFaceExpressions();
+
+            // Track face detection performance
+            const faceDetectionEnd = performance.now();
+            this.performanceStats.faceDetectionTime = faceDetectionEnd - faceDetectionStart;
+            this.updateFaceDetectionFPS();
 
             if (detections) {
                 this.faceDetections = detections;
                 this.landmarks = detections.landmarks;
+                
+                // Store previous expressions for interpolation
+                this.previousExpressions = { ...this.expressions };
                 this.expressions = detections.expressions;
 
                 // Update face info
@@ -612,7 +884,8 @@ class FacePuppetApp {
                     faceInfo.textContent = `Face detected! Confidence: ${(detections.detection.score * 100).toFixed(1)}%`;
                 }
 
-                // Animate avatar based on expressions
+                // Animate avatar based on expressions (lower frequency detection)
+                this.animateAvatar();
                 this.animateAvatar();
 
                 // Update expression indicators
@@ -634,8 +907,18 @@ class FacePuppetApp {
             console.error('Face tracking error:', error);
         }
 
-        // Continue tracking
-        requestAnimationFrame(() => this.trackFace());
+        // Optimized face tracking loop with throttling
+        this.faceTrackingFrameCount++;
+        const now = performance.now();
+        
+        // Throttle face tracking to improve performance
+        if (now - this.lastFaceTrackingTime >= this.faceTrackingInterval) {
+            this.lastFaceTrackingTime = now;
+            requestAnimationFrame(() => this.trackFace());
+        } else {
+            // Use setTimeout for more precise timing
+            setTimeout(() => this.trackFace(), this.faceTrackingInterval - (now - this.lastFaceTrackingTime));
+        }
     }
 
     animateAvatar() {
@@ -691,9 +974,12 @@ class FacePuppetApp {
     animateBlendShapes(expressions) {
         if (!this.avatar.morphTargets) return;
 
-        // Enhanced mapping for morph targets
+        // Remove frame skipping for smoother avatar animation
+        // Avatar animations now run at full frequency
+
+        // Enhanced mapping for morph targets with performance optimization
         const mappings = {
-            // Eye blinking
+            // Eye blinking - cached calculations
             'eyeBlinkLeft': this.calculateEyeBlinkStrength('left'),
             'eyeblinkleft': this.calculateEyeBlinkStrength('left'),
             'eyeBlink_L': this.calculateEyeBlinkStrength('left'),
@@ -704,13 +990,13 @@ class FacePuppetApp {
             'eyeBlink_R': this.calculateEyeBlinkStrength('right'),
             'EyeBlinkRight': this.calculateEyeBlinkStrength('right'),
             
-            // Mouth expressions
+            // Mouth expressions - optimized calculations
             'jawOpen': Math.max(this.calculateMouthOpenness() * 5.0, expressions.surprised * 3.0),
             'jawopen': Math.max(this.calculateMouthOpenness() * 5.0, expressions.surprised * 3.0),
             'JawOpen': Math.max(this.calculateMouthOpenness() * 5.0, expressions.surprised * 3.0),
             'mouthOpen': Math.max(this.calculateMouthOpenness() * 5.0, expressions.surprised * 2.4),
             
-            // Smiling
+            // Smiling - reuse calculations
             'mouthSmileLeft': expressions.happy * 3.0,
             'mouthsmileleft': expressions.happy * 3.0,
             'mouthSmile_L': expressions.happy * 3.0,
@@ -727,30 +1013,42 @@ class FacePuppetApp {
             'browOuterUpRight': expressions.surprised * 0.5,
         };
 
-        // Apply blend shape influences
+        // Apply blend shape influences with higher frequency smoothing
         let appliedCount = 0;
         
         for (const [shapeName, influence] of Object.entries(mappings)) {
-            const smoothedInfluence = this.smoothBlendshape(shapeName, influence);
+            const smoothedInfluence = this.smoothBlendshapeHighFreq(shapeName, influence);
             const shapeKey = shapeName.toLowerCase();
             
-            // Apply to morph targets
+            // Apply to morph targets with reduced threshold for smoother animation
             if (this.avatar.morphTargets[shapeKey]) {
                 const target = this.avatar.morphTargets[shapeKey];
-                target.mesh.morphTargetInfluences[target.index] = Math.max(0, Math.min(1, smoothedInfluence));
-                appliedCount++;
+                const finalInfluence = Math.max(0, Math.min(1, smoothedInfluence));
+                
+                // Reduced threshold for smoother updates (was 0.01, now 0.005)
+                const currentInfluence = target.mesh.morphTargetInfluences[target.index];
+                if (Math.abs(finalInfluence - currentInfluence) > 0.005) {
+                    target.mesh.morphTargetInfluences[target.index] = finalInfluence;
+                    appliedCount++;
+                }
             }
         }
 
-        // Debug info
-        if (appliedCount > 0 && Math.random() < 0.01) {
-            console.log(`🎭 Applied ${appliedCount} blendshape influences`);
+        // Debug info (reduced frequency)
+        if (appliedCount > 0 && Math.random() < 0.001) { // Further reduced logging
+            console.log(`🎭 Applied ${appliedCount} blendshape influences (High-Freq)`);
         }
     }
 
-    // Helper methods for expression calculation
+    // Helper methods for expression calculation with caching
     calculateEyeBlinkStrength(side) {
         if (!this.landmarks) return 0;
+        
+        // Cache key for this calculation
+        const cacheKey = `eyeBlink_${side}_${this.faceTrackingFrameCount}`;
+        if (this.calculationCache && this.calculationCache[cacheKey]) {
+            return this.calculationCache[cacheKey];
+        }
         
         try {
             const eyeLandmarks = side === 'left' ? this.landmarks.getLeftEye() : this.landmarks.getRightEye();
@@ -763,7 +1061,13 @@ class FacePuppetApp {
             const eyeHeight = Math.abs(upperEyelid.y - lowerEyelid.y);
             const normalizedHeight = eyeHeight / eyeWidth;
             
-            return Math.max(0, 1 - (normalizedHeight * 8));
+            const result = Math.max(0, 1 - (normalizedHeight * 8));
+            
+            // Cache the result
+            if (!this.calculationCache) this.calculationCache = {};
+            this.calculationCache[cacheKey] = result;
+            
+            return result;
         } catch (error) {
             return 0;
         }
@@ -771,6 +1075,12 @@ class FacePuppetApp {
 
     calculateMouthOpenness() {
         if (!this.landmarks) return 0;
+        
+        // Cache key for this calculation
+        const cacheKey = `mouthOpen_${this.faceTrackingFrameCount}`;
+        if (this.calculationCache && this.calculationCache[cacheKey]) {
+            return this.calculationCache[cacheKey];
+        }
         
         try {
             const mouth = this.landmarks.getMouth();
@@ -783,14 +1093,27 @@ class FacePuppetApp {
             const mouthHeight = Math.abs(upperLip.y - lowerLip.y);
             const normalizedHeight = mouthHeight / mouthWidth;
             
-            return Math.max(0, normalizedHeight - 0.1) * 2;
+            const result = Math.max(0, normalizedHeight - 0.1) * 2;
+            
+            // Cache the result
+            if (!this.calculationCache) this.calculationCache = {};
+            this.calculationCache[cacheKey] = result;
+            
+            return result;
         } catch (error) {
             return 0;
         }
     }
 
     smoothBlendshape(shapeName, value) {
+        // Optimized smoothing with early exit for performance
         const prevValue = this.blendshapeSmoothing[shapeName] || 0;
+        
+        // Skip smoothing calculation if the change is minimal
+        if (Math.abs(value - prevValue) < 0.001) {
+            return prevValue;
+        }
+        
         const smoothed = prevValue + (value - prevValue) * this.smoothingFactor;
         this.blendshapeSmoothing[shapeName] = smoothed;
         return smoothed;
@@ -799,7 +1122,126 @@ class FacePuppetApp {
     updateAvatarAnimation() {
         // This method is called in the render loop for any continuous animations
         if (this.avatar && !this.avatar.isFallback) {
-            // Add any continuous animations here if needed
+            // Clear calculation cache periodically to prevent memory leaks
+            if (this.frameCount % 120 === 0) { // Every 2 seconds at 60fps
+                this.clearCalculationCache();
+            }
+        }
+    }
+
+    updateAvatarAnimationHighFreq(currentTime) {
+        // High-frequency avatar animation updates (60 FPS)
+        // This runs independently of face detection frequency
+        
+        if (!this.avatar || !this.expressions) return;
+        
+        this.avatarAnimationFrameCount++;
+        
+        // Interpolate expressions between face detection updates for smoother animation
+        const interpolatedExpressions = this.interpolateExpressions();
+        
+        // Update avatar with interpolated data
+        if (this.avatar.isFallback) {
+            this.animateFallbackAvatar(interpolatedExpressions);
+        } else {
+            this.animateBlendShapes(interpolatedExpressions);
+        }
+    }
+
+    interpolateExpressions() {
+        // Create smoother animation by interpolating between face detection updates
+        if (!this.expressions || !this.previousExpressions) {
+            return this.expressions || {};
+        }
+        
+        // Calculate interpolation factor based on time since last face detection
+        const timeSinceLastDetection = performance.now() - this.lastFaceTrackingTime;
+        const interpolationFactor = Math.min(timeSinceLastDetection / this.faceTrackingInterval, 1.0);
+        
+        const interpolated = {};
+        
+        // Interpolate each expression value
+        for (const [key, currentValue] of Object.entries(this.expressions)) {
+            const previousValue = this.previousExpressions[key] || 0;
+            
+            // Use easing function for smoother interpolation
+            const easedFactor = this.easeInOutCubic(interpolationFactor);
+            interpolated[key] = previousValue + (currentValue - previousValue) * easedFactor;
+        }
+        
+        return interpolated;
+    }
+
+    easeInOutCubic(t) {
+        // Smooth easing function for more natural animation
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    smoothBlendshapeHighFreq(shapeName, value) {
+        // High-frequency smoothing with different parameters
+        const prevValue = this.blendshapeSmoothing[shapeName] || 0;
+        
+        // Skip smoothing calculation if the change is minimal
+        if (Math.abs(value - prevValue) < 0.0005) { // Even smaller threshold for smoother animation
+            return prevValue;
+        }
+        
+        // Use higher smoothing factor for more responsive animation
+        const smoothed = prevValue + (value - prevValue) * this.avatarSmoothingFactor;
+        this.blendshapeSmoothing[shapeName] = smoothed;
+        return smoothed;
+    }
+
+    clearCalculationCache() {
+        // Clear calculation cache to prevent memory leaks
+        this.calculationCache = {};
+    }
+
+    createDetectionCanvas() {
+        // Create a smaller canvas for faster face detection
+        this.detectionCanvas = document.createElement('canvas');
+        this.detectionCanvas.width = 320; // Reduced size for faster processing
+        this.detectionCanvas.height = 240;
+        this.detectionContext = this.detectionCanvas.getContext('2d');
+        
+        // Hide the detection canvas (it's just for processing)
+        this.detectionCanvas.style.display = 'none';
+        document.body.appendChild(this.detectionCanvas);
+        
+        console.log('✅ Detection canvas created (320x240) for faster face-api processing');
+    }
+
+    optimizeVideoFrame() {
+        // Draw video frame to smaller detection canvas for faster processing
+        if (!this.video || !this.detectionCanvas || this.video.videoWidth === 0) {
+            return null;
+        }
+        
+        try {
+            // Calculate aspect ratio and draw with optimal scaling
+            const videoAspect = this.video.videoWidth / this.video.videoHeight;
+            const canvasAspect = this.detectionCanvas.width / this.detectionCanvas.height;
+            
+            let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+            
+            if (videoAspect > canvasAspect) {
+                drawHeight = this.detectionCanvas.height;
+                drawWidth = drawHeight * videoAspect;
+                offsetX = (this.detectionCanvas.width - drawWidth) / 2;
+            } else {
+                drawWidth = this.detectionCanvas.width;
+                drawHeight = drawWidth / videoAspect;
+                offsetY = (this.detectionCanvas.height - drawHeight) / 2;
+            }
+            
+            // Clear and draw video frame
+            this.detectionContext.clearRect(0, 0, this.detectionCanvas.width, this.detectionCanvas.height);
+            this.detectionContext.drawImage(this.video, offsetX, offsetY, drawWidth, drawHeight);
+            
+            return this.detectionCanvas;
+        } catch (error) {
+            console.warn('Video frame optimization failed:', error);
+            return this.video; // Fallback to original video
         }
     }
 

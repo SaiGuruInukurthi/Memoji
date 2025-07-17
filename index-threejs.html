@@ -236,6 +236,19 @@
             background: rgba(76, 175, 80, 0.3);
         }
 
+        .performance-counter {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 8px;
+            margin: 10px 0;
+            text-align: center;
+            color: #00ff88;
+            text-shadow: 0 0 5px rgba(0, 255, 136, 0.3);
+        }
+
         @media (max-width: 768px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -299,6 +312,7 @@
                             <button id="startBtn">🎬 Start Camera</button>
                             <button id="resetBtn" disabled>🔄 Reset Avatar</button>
                             <button id="toggleDebugBtn" disabled>🐛 Toggle Debug</button>
+                            <button id="togglePerformanceBtn" disabled>⚡ Performance Mode</button>
                         </div>
                     </div>
                     
@@ -344,6 +358,7 @@
                     <div id="status" class="status loading">🚀 Initializing Three.js application...</div>
                     <div id="avatarInfo">🤖 Loading avatar...</div>
                     <div id="faceInfo">👤 No face detected</div>
+                    <div id="performanceCounter" class="performance-counter">FPS: -- | Render: --ms | Frame: --ms</div>
                     
                     <div class="expression-indicators">
                         <div id="happyIndicator" class="expression-indicator">😊 Happy</div>
@@ -474,6 +489,19 @@
                     if (window.app) {
                         window.app.debugMode = !window.app.debugMode;
                         this.textContent = window.app.debugMode ? '🐛 Hide Debug' : '🐛 Toggle Debug';
+                    }
+                });
+            }
+
+            // Performance mode toggle
+            const togglePerformanceBtn = document.getElementById('togglePerformanceBtn');
+            if (togglePerformanceBtn) {
+                togglePerformanceBtn.addEventListener('click', function() {
+                    if (window.app) {
+                        window.app.adaptiveQuality = !window.app.adaptiveQuality;
+                        window.app.frustumCulling = !window.app.frustumCulling;
+                        this.textContent = window.app.adaptiveQuality ? '⚡ Performance ON' : '⚡ Performance OFF';
+                        this.style.background = window.app.adaptiveQuality ? 'rgba(76, 175, 80, 0.3)' : '';
                     }
                 });
             }
