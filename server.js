@@ -5,14 +5,21 @@ const helmet = require('helmet');
 const compression = require('compression');
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 
 // Security middleware
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.babylonjs.com", "https://cdn.jsdelivr.net"],
+            scriptSrc: [
+                "'self'", 
+                "'unsafe-inline'", 
+                "'unsafe-eval'", 
+                "https://unpkg.com", 
+                "https://cdn.jsdelivr.net",
+                "https://cdn.babylonjs.com" // Keep for backward compatibility
+            ],
             scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "blob:", "https:"],
@@ -129,12 +136,27 @@ app.get('/api/avatars', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'healthy', uptime: process.uptime() });
+    res.status(200).json({ 
+        status: 'healthy', 
+        uptime: process.uptime(),
+        engine: 'Three.js',
+        performance: 'optimized'
+    });
 });
 
-// Default route - serve index.html
+// Route for Three.js version (new default)
 app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index-threejs.html'));
+});
+
+// Route for original Babylon.js version (backward compatibility)
+app.get('/babylon', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Performance optimization route
+app.get('/threejs', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index-threejs.html'));
 });
 
 // Error handling middleware
