@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memoji-Style Face Puppet</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 10px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-size: 2.5rem;
+        }
+
+        .main-content {
+            margin-bottom: 30px;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            align-items: start;
+        }
+
+        .video-container {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            aspect-ratio: 4/3;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transform: scaleX(-1); /* Flip horizontally to create mirror effect */
+        }
+
+        .canvas-container {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            aspect-ratio: 4/3;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: grab;
+        }
+
+        #renderCanvas:active {
+            cursor: grabbing;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .status.loading {
+            background: rgba(255, 193, 7, 0.2);
+            border: 2px solid #ffc107;
+        }
+
+        .status.ready {
+            background: rgba(40, 167, 69, 0.2);
+            border: 2px solid #28a745;
+        }
+
+        .status.error {
+            background: rgba(220, 53, 69, 0.2);
+            border: 2px solid #dc3545;
+        }
+
+        .btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .zoom-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .zoom-controls .btn {
+            margin: 0;
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .camera-controls {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .avatar-selection {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .avatar-selection label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .avatar-selection select {
+            width: 100%;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border: 2px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+
+        .avatar-selection select option {
+            background: #4a5568;
+            color: white;
+        }
+
+        .avatar-selection select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 10px;
+        }
+
+        .control-group label {
+            color: white;
+            font-size: 14px;
+            min-width: 140px;
+            font-weight: 500;
+        }
+
+        .control-group input[type="range"] {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.2);
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .control-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .control-group input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .control-group input[type="range"]:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .control-group span {
+            color: #007bff;
+            font-weight: bold;
+            font-size: 14px;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .info-panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .expression-indicators {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .expression-indicator {
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 5px 15px;
+            font-size: 12px;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .expression-indicator.active {
+            background: rgba(40, 167, 69, 0.3);
+            border-color: #28a745;
+            transform: scale(1.05);
+        }
+
+        @media (max-width: 768px) {
+            .app-container {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .video-container,
+            .canvas-container {
+                max-width: 400px;
+                margin: 0 auto;
+            }
+            
+            .controls {
+                padding: 0 10px;
+            }
+            
+            .zoom-controls {
+                flex-direction: column;
+            }
+            
+            .zoom-controls .btn {
+                min-width: auto;
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+            
+            .container {
+                padding: 0;
+            }
+            
+            .control-group {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 5px;
+            }
+            
+            .control-group label {
+                min-width: auto;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Memoji-Style Face Puppet</h1>
+        
+        <div class="main-content">
+            <div class="status loading" id="status">
+                🚀 Initializing application...
+            </div>
+
+            <div class="app-container">
+                <div class="video-container">
+                    <video id="video" autoplay muted playsinline></video>
+                    <canvas id="overlay" class="overlay"></canvas>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="renderCanvas"></canvas>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn" id="startBtn" onclick="startApp()">🎬 Start Camera</button>
+                <button class="btn" id="resetBtn" onclick="resetAvatar()" disabled>🔄 Reset Avatar</button>
+                <button class="btn" id="toggleDebugBtn" onclick="toggleDebug()" disabled>🐛 Toggle Debug</button>
+                
+                <!-- Zoom Controls -->
+                <div class="zoom-controls">
+                    <button class="btn" id="zoomInBtn" onclick="zoomIn()" disabled>🔍+ Zoom In</button>
+                    <button class="btn" id="zoomOutBtn" onclick="zoomOut()" disabled>🔍- Zoom Out</button>
+                </div>
+                
+                <!-- Camera Position Controls -->
+                <div class="camera-controls">
+                    <div class="control-group">
+                        <label for="cameraHorizontal">⬅️➡️ Horizontal Position:</label>
+                        <input type="range" id="cameraHorizontal" min="-3" max="3" value="0" step="0.1" 
+                               oninput="updateCameraHorizontal(this.value)" disabled>
+                        <span id="horizontalValue">0.0</span>
+                    </div>
+                    <div class="control-group">
+                        <label for="cameraVertical">⬆️⬇️ Vertical Position:</label>
+                        <input type="range" id="cameraVertical" min="-5" max="5" value="4.8" step="0.1" 
+                               oninput="updateCameraVertical(this.value)" disabled>
+                        <span id="verticalValue">4.8</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>🎭 Your Avatar</h3>
+            <p id="avatarInfo">Loading avatar...</p>
+            
+            <h3>🎮 Avatar Selection</h3>
+            <div class="avatar-selection">
+                <label for="avatarSelect">Choose Avatar Model:</label>
+                <select id="avatarSelect" onchange="changeAvatar(this.value)" disabled>
+                    <option value="avatar.glb">Default Avatar</option>
+                    <option value="chainsaw_man_head_model.glb">Chainsaw Man</option>
+                    <option value="doll_ramen_arkit_facial_rig_test.glb">Doll Ramen</option>
+                    <option value="TeenBoyHead.glb">Teen Boy</option>
+                </select>
+                <button class="btn" id="loadAvatarBtn" onclick="loadSelectedAvatar()" disabled>🔄 Load Avatar</button>
+            </div>
+            
+            <h3>📊 Face Tracking Status</h3>
+            <p id="faceInfo">Waiting for camera...</p>
+            
+            <h4>🎭 Active Expressions</h4>
+            <div class="expression-indicators">
+                <div class="expression-indicator" id="expr-smile">😊 Smile</div>
+                <div class="expression-indicator" id="expr-mouth-open">😮 Mouth Open</div>
+                <div class="expression-indicator" id="expr-blink-left">😉 Blink Left</div>
+                <div class="expression-indicator" id="expr-blink-right">🙂 Blink Right</div>
+                <div class="expression-indicator" id="expr-eyebrow-raise">🤨 Eyebrow Raise</div>
+                <div class="expression-indicator" id="expr-surprise">😲 Surprise</div>
+                <div class="expression-indicator" id="expr-frown">☹️ Frown</div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>📋 Setup Instructions</h3>
+            <ol>
+                <li><strong>Download Required Models:</strong>
+                    <ul>
+                        <li>Create a <code>/models/</code> folder in your project</li>
+                        <li>MediaPipe will automatically download required models</li>
+                        <li>Required files: <code>tiny_face_detector_model-*</code>, <code>face_landmark_68_model-*</code>, <code>face_expression_model-*</code></li>
+                        <li>Or run: <code>.\download-models.bat</code> (automated download)</li>
+                    </ul>
+                </li>
+                <li><strong>✅ Ready Player Me Avatar:</strong>
+                    <ul>
+                        <li>Your custom avatar is already loaded! 🎉</li>
+                        <li>The app will automatically detect blendshapes for facial expressions</li>
+                        <li>To replace: Add a new <code>avatar.glb</code> file to the avatars folder</li>
+                    </ul>
+                </li>
+                <li><strong>Run Local Server:</strong>
+                    <ul>
+                        <li>Use: <code>npm start</code></li>
+                        <li>Or: <code>npx serve .</code></li>
+                        <li>Open: <code>http://localhost:8000</code></li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- Babylon.js (Stable Version) -->
+    <script src="https://cdn.babylonjs.com/babylon.max.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    
+    <!-- Main Application -->
+    <script src="app.js"></script>
+</body>
+</html>

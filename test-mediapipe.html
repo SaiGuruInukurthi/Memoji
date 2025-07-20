@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaPipe Migration Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #333;
+            color: white;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid #00ff00;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background: #444;
+        }
+        .status.ready { background: #004400; }
+        .status.error { background: #440000; }
+        .status.loading { background: #444400; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            background: #0066cc;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover { background: #0088ff; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        #faceInfo {
+            margin: 10px 0;
+            padding: 10px;
+            background: #222;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 MediaPipe Migration Test</h1>
+        
+        <div id="status" class="status">🚀 Initializing...</div>
+        
+        <video id="video" autoplay muted playsinline></video>
+        
+        <div>
+            <button id="startBtn" onclick="startApp()">📷 Start Camera</button>
+            <button id="resetBtn" onclick="resetAvatar()" disabled>🔄 Reset Avatar</button>
+            <button id="toggleDebugBtn" onclick="toggleDebug()" disabled>🐛 Show Debug</button>
+        </div>
+        
+        <div id="faceInfo">No face detected</div>
+        
+        <div id="expressionIndicators">
+            <h3>Expression Indicators:</h3>
+            <div id="expr-smile" class="expression-indicator">😊 Smile</div>
+            <div id="expr-mouth-open" class="expression-indicator">😮 Mouth Open</div>
+            <div id="expr-surprise" class="expression-indicator">😲 Surprise</div>
+            <div id="expr-sad" class="expression-indicator">😢 Sad</div>
+        </div>
+    </div>
+
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    
+    <script>
+        class MediaPipeTest {
+            constructor() {
+                this.video = document.getElementById('video');
+                this.isInitialized = false;
+                this.isTracking = false;
+                this.landmarks = null;
+                this.expressions = {};
+                
+                this.init();
+            }
+            
+            async init() {
+                try {
+                    console.log('🚀 Initializing MediaPipe Face Mesh...');
+                    
+                    this.faceMesh = new FaceMesh({
+                        locateFile: (file) => {
+                            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                        }
+                    });
+
+                    this.faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        refineLandmarks: true,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+
+                    this.faceMesh.onResults((results) => {
+                        this.onMediaPipeResults(results);
+                    });
+
+                    console.log('✅ MediaPipe Face Mesh initialized successfully');
+                    this.updateStatus('✅ MediaPipe ready! Click "Start Camera" to begin.', 'ready');
+                    this.isInitialized = true;
+                    
+                } catch (error) {
+                    console.error('❌ Initialization error:', error);
+                    this.updateStatus('❌ Initialization failed: ' + error.message, 'error');
+                }
+            }
+            
+            onMediaPipeResults(results) {
+                if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                    const landmarks = results.multiFaceLandmarks[0];
+                    this.processMediaPipeLandmarks(landmarks);
+                    
+                    document.getElementById('faceInfo').textContent = 
+                        `Face detected! Landmarks: ${landmarks.length} points`;
+                        
+                    this.updateExpressionIndicators();
+                } else {
+                    this.landmarks = null;
+                    this.expressions = {};
+                    document.getElementById('faceInfo').textContent = 'No face detected';
+                }
+            }
+            
+            processMediaPipeLandmarks(landmarks) {
+                this.landmarks = {
+                    positions: landmarks.map(landmark => ({
+                        x: landmark.x * this.video.videoWidth,
+                        y: landmark.y * this.video.videoHeight,
+                        z: landmark.z || 0
+                    }))
+                };
+
+                // Calculate basic expressions
+                this.calculateExpressions();
+            }
+            
+            calculateExpressions() {
+                if (!this.landmarks) {
+                    this.expressions = {};
+                    return;
+                }
+                
+                // Simple expression calculations for testing
+                const mouthOpen = this.calculateMouthOpenness();
+                const smile = this.calculateSmile();
+                
+                this.expressions = {
+                    happy: smile,
+                    surprised: Math.min(mouthOpen * 2, 1.0),
+                    sad: Math.max(0, 0.5 - smile),
+                    neutral: 1.0 - Math.max(mouthOpen, smile)
+                };
+            }
+            
+            calculateMouthOpenness() {
+                if (!this.landmarks || !this.landmarks.positions) return 0;
+                
+                try {
+                    // MediaPipe mouth landmarks (simplified)
+                    const upperLip = this.landmarks.positions[13];
+                    const lowerLip = this.landmarks.positions[14];
+                    
+                    if (!upperLip || !lowerLip) return 0;
+                    
+                    const distance = Math.sqrt(
+                        Math.pow(upperLip.x - lowerLip.x, 2) + 
+                        Math.pow(upperLip.y - lowerLip.y, 2)
+                    );
+                    
+                    return Math.max(0, Math.min(1, distance / 20));
+                } catch (error) {
+                    return 0;
+                }
+            }
+            
+            calculateSmile() {
+                if (!this.landmarks || !this.landmarks.positions) return 0;
+                
+                try {
+                    // Very simplified smile detection
+                    const leftCorner = this.landmarks.positions[61];
+                    const rightCorner = this.landmarks.positions[291];
+                    
+                    if (!leftCorner || !rightCorner) return 0;
+                    
+                    const smileWidth = Math.abs(leftCorner.x - rightCorner.x);
+                    return Math.max(0, Math.min(1, (smileWidth - 50) / 30));
+                } catch (error) {
+                    return 0;
+                }
+            }
+            
+            updateExpressionIndicators() {
+                const indicators = {
+                    'expr-smile': this.expressions.happy > 0.3,
+                    'expr-mouth-open': this.expressions.surprised > 0.3,
+                    'expr-surprise': this.expressions.surprised > 0.5,
+                    'expr-sad': this.expressions.sad > 0.3
+                };
+
+                for (const [id, isActive] of Object.entries(indicators)) {
+                    const element = document.getElementById(id);
+                    if (element) {
+                        element.style.background = isActive ? '#00aa00' : '#333';
+                        element.style.color = isActive ? 'white' : '#999';
+                    }
+                }
+            }
+            
+            async startCamera() {
+                try {
+                    if (!this.isInitialized) {
+                        throw new Error('MediaPipe not initialized');
+                    }
+
+                    this.updateStatus('📷 Starting camera...', 'loading');
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            facingMode: 'user'
+                        }
+                    });
+
+                    this.video.srcObject = stream;
+                    
+                    return new Promise((resolve, reject) => {
+                        this.video.addEventListener('loadedmetadata', async () => {
+                            this.updateStatus('✅ Camera started! MediaPipe tracking active.', 'ready');
+                            this.isTracking = true;
+                            
+                            // Initialize MediaPipe camera
+                            this.camera = new Camera(this.video, {
+                                onFrame: async () => {
+                                    if (this.faceMesh && this.video.readyState >= 2) {
+                                        await this.faceMesh.send({ image: this.video });
+                                    }
+                                },
+                                width: 640,
+                                height: 480
+                            });
+                            
+                            await this.camera.start();
+                            
+                            document.getElementById('startBtn').textContent = '📷 Stop Camera';
+                            document.getElementById('startBtn').onclick = () => this.stopCamera();
+                            document.getElementById('resetBtn').disabled = false;
+                            document.getElementById('toggleDebugBtn').disabled = false;
+                            
+                            resolve();
+                        }, { once: true });
+                    });
+
+                } catch (error) {
+                    console.error('❌ Camera error:', error);
+                    this.updateStatus('❌ Camera error: ' + error.message, 'error');
+                }
+            }
+            
+            stopCamera() {
+                if (this.camera) {
+                    this.camera.stop();
+                }
+                
+                if (this.video.srcObject) {
+                    this.video.srcObject.getTracks().forEach(track => track.stop());
+                    this.video.srcObject = null;
+                }
+                
+                this.isTracking = false;
+                this.updateStatus('📷 Camera stopped', 'ready');
+                
+                document.getElementById('startBtn').textContent = '📷 Start Camera';
+                document.getElementById('startBtn').onclick = () => this.startCamera();
+                document.getElementById('resetBtn').disabled = true;
+                document.getElementById('toggleDebugBtn').disabled = true;
+            }
+            
+            updateStatus(message, type) {
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+            }
+        }
+
+        // Global functions for HTML buttons
+        let testApp;
+        
+        function startApp() {
+            if (testApp && testApp.isTracking) {
+                testApp.stopCamera();
+            } else {
+                testApp.startCamera();
+            }
+        }
+
+        function resetAvatar() {
+            console.log('Reset clicked (test mode)');
+        }
+
+        function toggleDebug() {
+            console.log('Debug toggled (test mode)');
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            testApp = new MediaPipeTest();
+        });
+    </script>
+</body>
+</html>

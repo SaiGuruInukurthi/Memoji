@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memoji - MediaPipe + Three.js Face Avatar</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 10px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-size: 2.5rem;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            align-items: start;
+        }
+
+        .video-container {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        #video {
+            width: 100%;
+            height: auto;
+            display: block;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+
+        #landmarkCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1); /* Mirror the landmarks */
+        }
+
+        .avatar-container {
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            position: relative;
+        }
+
+        #avatarCanvas {
+            width: 100%;
+            height: 400px;
+            display: block;
+        }
+
+        .controls {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .status.loading {
+            background: rgba(255, 193, 7, 0.2);
+            border: 2px solid #ffc107;
+        }
+
+        .status.ready {
+            background: rgba(40, 167, 69, 0.2);
+            border: 2px solid #28a745;
+        }
+
+        .status.error {
+            background: rgba(220, 53, 69, 0.2);
+            border: 2px solid #dc3545;
+        }
+
+        .btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .avatar-selection {
+            margin: 15px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .avatar-selection label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .avatar-selection select {
+            width: 100%;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border: 2px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+
+        .avatar-selection select option {
+            background: #4a5568;
+            color: white;
+        }
+
+        .avatar-selection select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .info-panel {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .info-panel h3 {
+            margin-top: 0;
+            color: #fff;
+        }
+
+        .expression-indicators {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .expression-indicator {
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            text-align: center;
+            font-size: 14px;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .expression-indicator.active {
+            background: rgba(0, 255, 0, 0.2);
+            border-color: #00ff00;
+            transform: scale(1.05);
+        }
+
+        .camera-controls {
+            margin-top: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            min-width: 140px;
+            font-size: 14px;
+        }
+
+        .control-group input[type="range"] {
+            flex: 1;
+            accent-color: #667eea;
+        }
+
+        .control-group span {
+            min-width: 40px;
+            text-align: center;
+            background: rgba(255,255,255,0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .controls {
+                padding: 15px;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                font-size: 14px;
+                margin: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Memoji - MediaPipe Face Avatar</h1>
+        
+        <div class="main-content">
+            <div class="video-container">
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="landmarkCanvas"></canvas>
+                <div class="status loading" id="status">📷 Initializing camera...</div>
+            </div>
+
+            <div class="avatar-container">
+                <canvas id="avatarCanvas"></canvas>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" id="startBtn" onclick="startApp()">🎬 Start Camera</button>
+            <button class="btn" id="resetBtn" onclick="resetAvatar()" disabled>🔄 Reset Avatar</button>
+            <button class="btn" id="toggleDebugBtn" onclick="toggleDebug()" disabled>🐛 Toggle Debug</button>
+            
+            <!-- Avatar Selection -->
+            <div class="avatar-selection">
+                <label for="avatarSelect">Choose Avatar Model:</label>
+                <select id="avatarSelect" onchange="changeAvatar(this.value)" disabled>
+                    <option value="avatar.glb">Default Avatar</option>
+                    <option value="chainsaw_man_head_model.glb">Chainsaw Man</option>
+                    <option value="doll_ramen_arkit_facial_rig_test.glb">Doll Ramen</option>
+                    <option value="TeenBoyHead.glb">Teen Boy</option>
+                </select>
+                <button class="btn" id="loadAvatarBtn" onclick="loadSelectedAvatar()" disabled>🔄 Load Avatar</button>
+            </div>
+
+            <!-- Camera Controls -->
+            <div class="camera-controls">
+                <div class="control-group">
+                    <label for="cameraX">⬅️➡️ Camera X:</label>
+                    <input type="range" id="cameraX" min="-5" max="5" value="0" step="0.1" 
+                           oninput="updateCameraPosition()" disabled>
+                    <span id="cameraXValue">0.0</span>
+                </div>
+                <div class="control-group">
+                    <label for="cameraY">⬆️⬇️ Camera Y:</label>
+                    <input type="range" id="cameraY" min="-5" max="5" value="0" step="0.1" 
+                           oninput="updateCameraPosition()" disabled>
+                    <span id="cameraYValue">0.0</span>
+                </div>
+                <div class="control-group">
+                    <label for="cameraZ">🔍 Camera Zoom:</label>
+                    <input type="range" id="cameraZ" min="1" max="10" value="3" step="0.1" 
+                           oninput="updateCameraPosition()" disabled>
+                    <span id="cameraZValue">3.0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>🎭 Your Avatar</h3>
+            <p id="avatarInfo">Loading avatar...</p>
+            
+            <h3>📊 MediaPipe Face Tracking</h3>
+            <p id="faceInfo">Waiting for camera...</p>
+            
+            <h4>🎭 Active Expressions</h4>
+            <div class="expression-indicators">
+                <div class="expression-indicator" id="expr-smile">😊 Smile</div>
+                <div class="expression-indicator" id="expr-mouth-open">😮 Mouth Open</div>
+                <div class="expression-indicator" id="expr-blink-left">😑 Left Blink</div>
+                <div class="expression-indicator" id="expr-blink-right">😑 Right Blink</div>
+                <div class="expression-indicator" id="expr-eyebrow-raise">🤨 Eyebrow Raise</div>
+                <div class="expression-indicator" id="expr-jaw-open">🥴 Jaw Open</div>
+            </div>
+
+            <h4>ℹ️ Instructions</h4>
+            <ul style="text-align: left; font-size: 14px; line-height: 1.6;">
+                <li>Click "Start Camera" to begin face tracking</li>
+                <li>Make sure your face is well-lit and centered</li>
+                <li>Try smiling, opening your mouth, blinking, and raising eyebrows</li>
+                <li>Use the avatar selection to switch between different models</li>
+                <li>Adjust camera position with the sliders</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/loaders/GLTFLoader.js"></script>
+
+    <!-- Our MediaPipe + Three.js App -->
+    <script src="app-mediapipe.js"></script>
+</body>
+</html>

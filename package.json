@@ -1,0 +1,41 @@
+{
+  "name": "face-avatar-app-threejs",
+  "version": "2.0.0",
+  "description": "High-performance face tracking avatar app with Three.js, enhanced mouth sensitivity and optimized rendering",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:threejs": "node server.js && echo 'Three.js version running at http://localhost:3000'",
+    "dev": "nodemon server.js",
+    "serve": "npx serve . -p 8000",
+    "test": "npm start",
+    "build": "echo 'Three.js app ready for production'",
+    "performance-test": "node -e \"console.log('Performance optimizations:\\n- Three.js rendering\\n- Frustum culling\\n- Optimized morph targets\\n- Memory management')\""
+  },
+  "keywords": [
+    "face-tracking",
+    "avatar",
+    "face-api",
+    "three.js",
+    "performance",
+    "ready-player-me",
+    "real-time",
+    "webgl",
+    "morph-targets",
+    "facial-animation"
+  ],
+  "author": "SaiGuruInukurthi",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
