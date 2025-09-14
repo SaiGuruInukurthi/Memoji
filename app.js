@@ -65,8 +65,64 @@ class FacePuppetApp {
         this.panX = 0;
         this.panY = 4.8;
         
+        // Suppress MediaPipe internal logs from the start
+        this.suppressMediaPipeLogs();
+        
         // Initialize the app
         this.init();
+    }
+    
+    // Suppress noisy MediaPipe console logs
+    suppressMediaPipeLogs() {
+        // Override console methods to filter MediaPipe logs
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        // Store originals for restoration
+        this.originalConsole = { log: originalLog, warn: originalWarn, error: originalError };
+        
+        // MediaPipe log patterns to suppress
+        const mediaPipePatterns = [
+            /gl_context/i,
+            /OpenGL/i,
+            /WebGL/i,
+            /I\d{4}\s\d{2}:\d{2}:\d{2}/,  // MediaPipe timestamp format
+            /W\d{4}\s\d{2}:\d{2}:\d{2}/,  // MediaPipe warning format
+            /face_mesh_solution/i,
+            /wasm/i,
+            /\$func\d+/,
+            /put_char/,
+            /doWritev/,
+            /_fd_write/
+        ];
+        
+        const shouldSuppress = (message) => {
+            const msgStr = Array.isArray(message) ? message.join(' ') : String(message);
+            return mediaPipePatterns.some(pattern => pattern.test(msgStr));
+        };
+        
+        console.log = (...args) => {
+            if (!shouldSuppress(args)) {
+                originalLog.apply(console, args);
+            }
+        };
+        
+        console.warn = (...args) => {
+            if (!shouldSuppress(args)) {
+                originalWarn.apply(console, args);
+            }
+        };
+        
+        console.error = (...args) => {
+            // Still show actual errors, just filter MediaPipe noise
+            const msgStr = args.join(' ');
+            if (!shouldSuppress(args) && !msgStr.includes('checking is disabled')) {
+                originalError.apply(console, args);
+            }
+        };
+        
+        console.log('🔇 MediaPipe console log suppression enabled (cleaner console!)');
     }
 
     async init() {
@@ -133,7 +189,7 @@ class FacePuppetApp {
             this.camera.attachControl(this.canvas, true);
             this.camera.setTarget(BABYLON.Vector3.Zero());
             this.camera.lowerRadiusLimit = 1;
-            this.camera.upperRadiusLimit = 10;
+            this.camera.upperRadiusLimit = 40; // Increased from 50 to 40 for maximum zoom out
 
             // Add better lighting for avatar
             const light = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), this.scene);
@@ -212,6 +268,55 @@ class FacePuppetApp {
                             skeleton: result.skeletons[0] || null,
                             animations: result.animationGroups || []
                         };
+
+                        // DISABLE ALL DEFAULT ANIMATIONS
+                        if (result.animationGroups && result.animationGroups.length > 0) {
+                            console.log(`🛑 Disabling ${result.animationGroups.length} default animations...`);
+                            result.animationGroups.forEach((animGroup, index) => {
+                                animGroup.stop(); // Stop the animation
+                                animGroup.pause(); // Pause it
+                                animGroup.setWeightForAllAnimatables(0); // Set weight to 0
+                                animGroup.speedRatio = 0; // Set speed to 0
+                                console.log(`🛑 Disabled animation: ${animGroup.name || `Animation_${index}`}`);
+                            });
+                            console.log('✅ All default animations disabled!');
+                        }
+
+                        // RESET ALL MORPH TARGETS TO NEUTRAL
+                        if (this.avatar.morphTargets && Object.keys(this.avatar.morphTargets).length > 0) {
+                            console.log('🔄 Resetting all morph targets to neutral...');
+                            Object.values(this.avatar.morphTargets).forEach(morphTarget => {
+                                if (morphTarget.target) {
+                                    morphTarget.target.influence = 0.0; // Set to neutral
+                                }
+                            });
+                            console.log('✅ All morph targets reset to neutral!');
+                        }
+
+                        // DISABLE SKELETAL ANIMATIONS
+                        if (this.avatar.skeleton) {
+                            console.log('🔄 Disabling skeletal animations...');
+                            this.avatar.skeleton.beginAnimation = null; // Disable skeleton animations
+                            
+                            // Stop any running animations on skeleton
+                            if (this.scene.animatables && this.scene.animatables.length > 0) {
+                                this.scene.animatables.forEach(animatable => {
+                                    if (animatable.target === this.avatar.skeleton) {
+                                        animatable.stop();
+                                        console.log('🛑 Stopped skeletal animation');
+                                    }
+                                });
+                            }
+                        }
+
+                        // DISABLE AUTO-MORPH TARGET UPDATES
+                        result.meshes.forEach(mesh => {
+                            if (mesh.morphTargetManager) {
+                                // Disable automatic morph target updates
+                                mesh.morphTargetManager.areUpdatesFrozen = false; // Keep updates enabled but controlled
+                                console.log(`🔧 Configured morph target manager for: ${mesh.name}`);
+                            }
+                        });
 
                         // Optimize Ready Player Me avatar positioning
                         this.setupReadyPlayerMeAvatar(result);
@@ -404,7 +509,7 @@ class FacePuppetApp {
         this.camera.alpha = -Math.PI / 2;
         this.camera.beta = Math.PI / 2.1;
         this.camera.lowerRadiusLimit = 0.8;
-        this.camera.upperRadiusLimit = 3.0;
+        this.camera.upperRadiusLimit = 40; // Increased for maximum zoom out capability
         
         console.log(`🎭 Avatar configured for head-only view with ${allHeadParts.length} head parts grouped together`);
         console.log(`📋 Head parts: ${allHeadParts.map(m => m.name).join(', ')}`);
@@ -427,7 +532,7 @@ class FacePuppetApp {
             );
             this.camera.attachControl(this.canvas, true);
             this.camera.lowerRadiusLimit = 0.8;
-            this.camera.upperRadiusLimit = 10;
+            this.camera.upperRadiusLimit = 40; // Increased for maximum zoom out capability
             console.log('✅ Babylon.js camera recreated');
         }
     }
@@ -1155,35 +1260,45 @@ class FacePuppetApp {
         // Calculate mouth opening based on landmarks for more accuracy
         const mouthOpenValue = this.calculateMouthOpenness();
         
-        // Enhanced mapping for Ready Player Me / ARKit compatible models
+        // Enhanced mapping for Ready Player Me / ARKit compatible models with ULTRA-RESPONSIVE detection
         const mappings = {
-            // Individual eye blinking with enhanced detection methods
-            'eyeBlinkLeft': Math.max(leftBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'eyeblinkleft': Math.max(leftBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'eyeBlink_L': Math.max(leftBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'EyeBlinkLeft': Math.max(leftBlinkStrength, (expressions.neutral || 0) * 0.5),
+            // Individual eye blinking with ENHANCED detection methods (more responsive)
+            'eyeBlinkLeft': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'eyeblinkleft': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'eyeBlink_L': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'EyeBlinkLeft': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'Blink_L': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'blink_L': Math.max(leftBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
             
-            'eyeBlinkRight': Math.max(rightBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'eyeblinkright': Math.max(rightBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'eyeBlink_R': Math.max(rightBlinkStrength, (expressions.neutral || 0) * 0.5),
-            'EyeBlinkRight': Math.max(rightBlinkStrength, (expressions.neutral || 0) * 0.5),
+            'eyeBlinkRight': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'eyeblinkright': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'eyeBlink_R': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'EyeBlinkRight': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'Blink_R': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
+            'blink_R': Math.max(rightBlinkStrength * 1.2, (expressions.neutral || 0) * 0.5),
             
-            // Mouth expressions - combining landmark data with expression analysis WITH EXTREME AMPLIFICATION (2x more)
-            'jawOpen': Math.max(mouthOpenValue * 5.0, expressions.surprised * 3.0 + (expressions.fearful || 0) * 2.0), // 2x amplification (2.5 -> 5.0)
-            'jawopen': Math.max(mouthOpenValue * 5.0, expressions.surprised * 3.0),
-            'JawOpen': Math.max(mouthOpenValue * 5.0, expressions.surprised * 3.0),
-            'mouthOpen': Math.max(mouthOpenValue * 5.0, expressions.surprised * 2.4),
+            // Mouth expressions - ULTRA-AMPLIFIED for maximum responsiveness (3x more sensitive)
+            'jawOpen': Math.max(mouthOpenValue * 8.0, expressions.surprised * 4.0 + (expressions.fearful || 0) * 3.0), // 3x amplification (5.0 -> 8.0)
+            'jawopen': Math.max(mouthOpenValue * 8.0, expressions.surprised * 4.0),
+            'JawOpen': Math.max(mouthOpenValue * 8.0, expressions.surprised * 4.0),
+            'mouthOpen': Math.max(mouthOpenValue * 8.0, expressions.surprised * 3.5),
+            'MouthOpen': Math.max(mouthOpenValue * 8.0, expressions.surprised * 3.5),
+            'mouth_open': Math.max(mouthOpenValue * 8.0, expressions.surprised * 3.5),
             
-            // Enhanced smiling with asymmetric support AND EXTREME AMPLIFICATION (2x more)
-            'mouthSmileLeft': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('left'), // 2x amplification (1.5 -> 3.0)
-            'mouthsmileleft': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('left'),
-            'mouthSmile_L': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('left'),
-            'MouthSmileLeft': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('left'),
+            // Enhanced smiling with asymmetric support AND ULTRA-AMPLIFICATION (3x more responsive)
+            'mouthSmileLeft': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'), // 3x amplification (3.0 -> 4.5)
+            'mouthsmileleft': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'),
+            'mouthSmile_L': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'),
+            'MouthSmileLeft': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'),
+            'Smile_L': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'),
+            'smile_L': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left'),
             
-            'mouthSmileRight': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('right'),
-            'mouthsmileright': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('right'),
-            'mouthSmile_R': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('right'),
-            'MouthSmileRight': (expressions.happy * 3.0) + this.calculateSmileAsymmetry('right'),
+            'mouthSmileRight': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
+            'mouthsmileright': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
+            'mouthSmile_R': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
+            'MouthSmileRight': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
+            'Smile_R': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
+            'smile_R': (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right'),
             
             // Frowning with better emotion mapping
             'mouthFrownLeft': expressions.sad * 0.8 + (expressions.angry || 0) * 0.6 + (expressions.disgusted || 0) * 0.4,
@@ -1196,20 +1311,24 @@ class FacePuppetApp {
             'mouthFrown_R': expressions.sad * 0.8 + (expressions.angry || 0) * 0.6,
             'MouthFrownRight': expressions.sad * 0.8 + (expressions.angry || 0) * 0.6,
             
-            // Enhanced eyebrow movement with landmark-based calculation
-            'browInnerUp': this.calculateBrowMovement('inner') + expressions.surprised * 0.6 + (expressions.fearful || 0) * 0.5,
-            'browinnerup': this.calculateBrowMovement('inner') + expressions.surprised * 0.6,
-            'BrowInnerUp': this.calculateBrowMovement('inner') + expressions.surprised * 0.6,
+            // Enhanced eyebrow movement with landmark-based calculation AND MORE SENSITIVITY
+            'browInnerUp': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8 + (expressions.fearful || 0) * 0.7,
+            'browinnerup': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
+            'BrowInnerUp': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
+            'browUp_L': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
+            'browUp_R': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
+            'Brow_Up_L': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
+            'Brow_Up_R': this.calculateBrowMovement('inner') * 1.5 + expressions.surprised * 0.8,
             
-            'browOuterUpLeft': this.calculateBrowMovement('outerLeft') + expressions.surprised * 0.5,
-            'browouterupleft': this.calculateBrowMovement('outerLeft') + expressions.surprised * 0.5,
-            'browOuterUp_L': this.calculateBrowMovement('outerLeft') + expressions.surprised * 0.5,
-            'BrowOuterUpLeft': this.calculateBrowMovement('outerLeft') + expressions.surprised * 0.5,
+            'browOuterUpLeft': this.calculateBrowMovement('outerLeft') * 1.3 + expressions.surprised * 0.7,
+            'browouterupleft': this.calculateBrowMovement('outerLeft') * 1.3 + expressions.surprised * 0.7,
+            'browOuterUp_L': this.calculateBrowMovement('outerLeft') * 1.3 + expressions.surprised * 0.7,
+            'BrowOuterUpLeft': this.calculateBrowMovement('outerLeft') * 1.3 + expressions.surprised * 0.7,
             
-            'browOuterUpRight': this.calculateBrowMovement('outerRight') + expressions.surprised * 0.5,
-            'browouterupright': this.calculateBrowMovement('outerRight') + expressions.surprised * 0.5,
-            'browOuterUp_R': this.calculateBrowMovement('outerRight') + expressions.surprised * 0.5,
-            'BrowOuterUpRight': this.calculateBrowMovement('outerRight') + expressions.surprised * 0.5,
+            'browOuterUpRight': this.calculateBrowMovement('outerRight') * 1.3 + expressions.surprised * 0.7,
+            'browouterupright': this.calculateBrowMovement('outerRight') * 1.3 + expressions.surprised * 0.7,
+            'browOuterUp_R': this.calculateBrowMovement('outerRight') * 1.3 + expressions.surprised * 0.7,
+            'BrowOuterUpRight': this.calculateBrowMovement('outerRight') * 1.3 + expressions.surprised * 0.7,
             
             // Cheek and nose expressions
             'cheekPuff': (expressions.surprised || 0) * 0.4 + this.calculateCheekPuff(),
@@ -1884,25 +2003,132 @@ class FacePuppetApp {
         }
     }
 
-    // Compatibility methods for MediaPipe landmarks
+    // Compatibility methods for MediaPipe landmarks with validation
     getMouth() {
-        return this.landmarks ? this.landmarks.getMouth() : [];
+        if (!this.landmarks) return [];
+        
+        const mouth = this.landmarks.getMouth();
+        if (!mouth || mouth.length === 0) return [];
+        
+        // Validate mouth landmarks and filter out invalid points
+        const validatedMouth = mouth.map(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || 
+                isNaN(point.x) || isNaN(point.y) || !isFinite(point.x) || !isFinite(point.y)) {
+                return null; // Mark as invalid
+            }
+            return {
+                x: point.x,
+                y: point.y,
+                z: point.z || 0
+            };
+        });
+        
+        // Check if we have enough valid points (at least 15 out of expected 21)
+        const validCount = validatedMouth.filter(p => p !== null).length;
+        if (validCount < 15) {
+            console.warn(`⚠️ Insufficient valid mouth landmarks: ${validCount}/${mouth.length}`);
+            return [];
+        }
+        
+        return validatedMouth;
     }
 
     getLeftEye() {
-        return this.landmarks ? this.landmarks.getLeftEye() : [];
+        if (!this.landmarks) return [];
+        
+        const eye = this.landmarks.getLeftEye();
+        if (!eye || eye.length === 0) return [];
+        
+        // Validate eye landmarks
+        const validatedEye = eye.map(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || 
+                isNaN(point.x) || isNaN(point.y) || !isFinite(point.x) || !isFinite(point.y)) {
+                return null;
+            }
+            return {
+                x: point.x,
+                y: point.y,
+                z: point.z || 0
+            };
+        });
+        
+        const validCount = validatedEye.filter(p => p !== null).length;
+        if (validCount < 4) { // Need at least 4 points for eye calculations
+            return [];
+        }
+        
+        return validatedEye;
     }
 
     getRightEye() {
-        return this.landmarks ? this.landmarks.getRightEye() : [];
+        if (!this.landmarks) return [];
+        
+        const eye = this.landmarks.getRightEye();
+        if (!eye || eye.length === 0) return [];
+        
+        // Validate eye landmarks
+        const validatedEye = eye.map(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || 
+                isNaN(point.x) || isNaN(point.y) || !isFinite(point.x) || !isFinite(point.y)) {
+                return null;
+            }
+            return {
+                x: point.x,
+                y: point.y,
+                z: point.z || 0
+            };
+        });
+        
+        const validCount = validatedEye.filter(p => p !== null).length;
+        if (validCount < 4) {
+            return [];
+        }
+        
+        return validatedEye;
     }
 
     getNose() {
-        return this.landmarks ? this.landmarks.getNose() : [];
+        if (!this.landmarks) return [];
+        
+        const nose = this.landmarks.getNose();
+        if (!nose || nose.length === 0) return [];
+        
+        // Validate nose landmarks
+        const validatedNose = nose.map(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || 
+                isNaN(point.x) || isNaN(point.y) || !isFinite(point.x) || !isFinite(point.y)) {
+                return null;
+            }
+            return {
+                x: point.x,
+                y: point.y,
+                z: point.z || 0
+            };
+        });
+        
+        return validatedNose.filter(p => p !== null);
     }
 
     getJawOutline() {
-        return this.landmarks ? this.landmarks.getJawOutline() : [];
+        if (!this.landmarks) return [];
+        
+        const jaw = this.landmarks.getJawOutline();
+        if (!jaw || jaw.length === 0) return [];
+        
+        // Validate jaw landmarks
+        const validatedJaw = jaw.map(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' || 
+                isNaN(point.x) || isNaN(point.y) || !isFinite(point.x) || !isFinite(point.y)) {
+                return null;
+            }
+            return {
+                x: point.x,
+                y: point.y,
+                z: point.z || 0
+            };
+        });
+        
+        return validatedJaw.filter(p => p !== null);
     }
 
     calculateMouthOpenness() {
@@ -1936,10 +2162,24 @@ class FacePuppetApp {
             const invalidPoints = requiredPoints.filter(point => !point || typeof point.x !== 'number' || typeof point.y !== 'number' || isNaN(point.x) || isNaN(point.y));
             
             if (invalidPoints.length > 0) {
-                // Only warn occasionally to prevent spam
-                if (Math.random() < 0.01) {
-                    console.warn(`⚠️ Invalid mouth landmarks: ${invalidPoints.length}/${requiredPoints.length} points invalid`);
+                // Use fallback calculation with fewer points
+                const basicPoints = [topLip, bottomLip, leftCorner, rightCorner].filter(point => 
+                    point && typeof point.x === 'number' && typeof point.y === 'number' && !isNaN(point.x) && !isNaN(point.y)
+                );
+                
+                if (basicPoints.length >= 4) {
+                    // Use basic mouth calculation with just 4 points
+                    const basicHeight = this.distance(basicPoints[0], basicPoints[1]); // topLip to bottomLip
+                    const basicWidth = this.distance(basicPoints[2], basicPoints[3]); // leftCorner to rightCorner
+                    
+                    if (basicWidth > 0 && !isNaN(basicHeight) && !isNaN(basicWidth)) {
+                        const basicRatio = basicHeight / basicWidth;
+                        const basicOpenness = Math.max(0, (basicRatio - 0.06) * 20); // Less amplification for safety
+                        return Math.min(1, basicOpenness + (this.expressions?.surprised || 0) * 0.8);
+                    }
                 }
+                
+                // Last resort: use expression data only
                 return this.expressions?.surprised * 0.8 || 0;
             }
             
@@ -2420,6 +2660,927 @@ class FacePuppetApp {
     maxTongueTest() {
         console.log('🚀 === MAXIMUM TONGUE TEST ===');
         this.forceTongueTest(1.0); // Test with maximum strength
+    }
+
+    // CRITICAL DEBUG FUNCTION - Call this to diagnose facial animation issues
+    diagnoseFacialAnimations() {
+        console.log('🔍 === FACIAL ANIMATION DIAGNOSIS ===');
+        
+        if (!this.avatar) {
+            console.log('❌ NO AVATAR LOADED!');
+            return false;
+        }
+        
+        console.log('🤖 Avatar loaded:', !!this.avatar);
+        console.log('🤖 Is fallback avatar:', !!this.avatar.isFallback);
+        
+        // Check morph targets
+        if (!this.avatar.morphTargets || Object.keys(this.avatar.morphTargets).length === 0) {
+            console.log('❌ CRITICAL ISSUE: NO MORPH TARGETS FOUND!');
+            console.log('💡 This explains why facial expressions don\'t work');
+            console.log('💡 Head tracking works because it rotates the head mesh directly');
+            
+            // Search for morph targets in scene meshes
+            console.log('🔍 Searching scene for morph target managers...');
+            let foundMorphTargets = false;
+            
+            if (this.scene && this.scene.meshes) {
+                this.scene.meshes.forEach((mesh, index) => {
+                    if (mesh.morphTargetManager && mesh.morphTargetManager.numTargets > 0) {
+                        console.log(`✅ FOUND MORPH TARGETS in mesh[${index}]: ${mesh.name}`);
+                        console.log(`📊 Number of targets: ${mesh.morphTargetManager.numTargets}`);
+                        foundMorphTargets = true;
+                        
+                        // List first 20 targets
+                        console.log('🎭 Available morph targets:');
+                        for (let i = 0; i < Math.min(20, mesh.morphTargetManager.numTargets); i++) {
+                            const target = mesh.morphTargetManager.getTarget(i);
+                            console.log(`   ${i}: ${target.name} (current: ${target.influence.toFixed(3)})`);
+                        }
+                        
+                        if (mesh.morphTargetManager.numTargets > 20) {
+                            console.log(`   ... and ${mesh.morphTargetManager.numTargets - 20} more targets`);
+                        }
+                        
+                        // TEST: Try to activate a mouth target
+                        for (let i = 0; i < mesh.morphTargetManager.numTargets; i++) {
+                            const target = mesh.morphTargetManager.getTarget(i);
+                            if (target.name.toLowerCase().includes('mouth') || 
+                                target.name.toLowerCase().includes('jaw') ||
+                                target.name.toLowerCase().includes('open')) {
+                                console.log(`🧪 TESTING ${target.name}...`);
+                                const originalValue = target.influence;
+                                target.influence = 0.8;
+                                
+                                setTimeout(() => {
+                                    target.influence = originalValue;
+                                    console.log(`🔄 Reset ${target.name}`);
+                                }, 2000);
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+            
+            if (!foundMorphTargets) {
+                console.log('❌ NO MORPH TARGET MANAGERS FOUND IN SCENE!');
+                console.log('💡 This avatar may not support blend shapes');
+                console.log('💡 Try loading a different Ready Player Me avatar');
+            }
+            
+        } else {
+            console.log('✅ Morph targets found:', Object.keys(this.avatar.morphTargets).length);
+            console.log('📋 Available targets:', Object.keys(this.avatar.morphTargets));
+            
+            // Test key facial targets
+            const keyTargets = ['jawOpen', 'mouthOpen', 'eyeBlinkLeft', 'eyeBlinkRight', 'mouthSmileLeft'];
+            
+            keyTargets.forEach(targetName => {
+                const found = this.avatar.morphTargets[targetName] || 
+                             this.avatar.morphTargets[targetName.toLowerCase()] ||
+                             this.avatar.morphTargets[targetName.toUpperCase()];
+                
+                if (found) {
+                    console.log(`✅ Key target found: ${targetName}`);
+                    // Test it
+                    console.log(`🧪 Testing ${targetName}...`);
+                    const originalValue = found.target.influence;
+                    found.target.influence = 0.7;
+                    
+                    setTimeout(() => {
+                        found.target.influence = originalValue;
+                        console.log(`🔄 Reset ${targetName}`);
+                    }, 1500);
+                } else {
+                    console.log(`❌ Key target missing: ${targetName}`);
+                }
+            });
+        }
+        
+        // Check if facial detection is working
+        console.log('👁️ Facial detection status:');
+        console.log('   Landmarks available:', !!this.landmarks);
+        console.log('   Expressions available:', !!this.expressions);
+        
+        if (this.landmarks) {
+            const mouthOpen = this.calculateMouthOpenness();
+            const leftBlink = this.calculateEyeBlinkStrength('left');
+            const rightBlink = this.calculateEyeBlinkStrength('right');
+            
+            console.log('📊 Current detection values:');
+            console.log(`   Mouth openness: ${(mouthOpen * 100).toFixed(1)}%`);
+            console.log(`   Left eye blink: ${(leftBlink * 100).toFixed(1)}%`);
+            console.log(`   Right eye blink: ${(rightBlink * 100).toFixed(1)}%`);
+            
+            if (mouthOpen < 0.01 && leftBlink < 0.01 && rightBlink < 0.01) {
+                console.log('⚠️ Very low detection values - try making facial expressions');
+            }
+        } else {
+            console.log('❌ No facial landmarks detected - check camera and face detection');
+        }
+        
+        return foundMorphTargets || (this.avatar.morphTargets && Object.keys(this.avatar.morphTargets).length > 0);
+    }
+
+    // Force test facial expressions with direct morph target access
+    forceTestFacialExpressions() {
+        console.log('🚀 === FORCE TESTING FACIAL EXPRESSIONS ===');
+        
+        let testedAny = false;
+        
+        // Method 1: Try stored morph targets
+        if (this.avatar.morphTargets && Object.keys(this.avatar.morphTargets).length > 0) {
+            console.log('🧪 Testing stored morph targets...');
+            const targets = Object.keys(this.avatar.morphTargets);
+            
+            targets.slice(0, 5).forEach((targetName, index) => {
+                setTimeout(() => {
+                    console.log(`🧪 Testing: ${targetName}`);
+                    const originalValue = this.avatar.morphTargets[targetName].target.influence;
+                    this.avatar.morphTargets[targetName].target.influence = 0.8;
+                    testedAny = true;
+                    
+                    setTimeout(() => {
+                        this.avatar.morphTargets[targetName].target.influence = originalValue;
+                    }, 1000);
+                }, index * 1200);
+            });
+        }
+        
+        // Method 2: Try direct scene mesh access
+        if (this.scene && this.scene.meshes) {
+            console.log('🧪 Testing scene mesh morph targets...');
+            
+            this.scene.meshes.forEach(mesh => {
+                if (mesh.morphTargetManager && mesh.morphTargetManager.numTargets > 0) {
+                    console.log(`🧪 Testing mesh: ${mesh.name}`);
+                    
+                    // Test first few targets
+                    for (let i = 0; i < Math.min(3, mesh.morphTargetManager.numTargets); i++) {
+                        const target = mesh.morphTargetManager.getTarget(i);
+                        
+                        setTimeout(() => {
+                            console.log(`🧪 Testing mesh target: ${target.name}`);
+                            const originalValue = target.influence;
+                            target.influence = 0.7;
+                            testedAny = true;
+                            
+                            setTimeout(() => {
+                                target.influence = originalValue;
+                                console.log(`🔄 Reset ${target.name}`);
+                            }, 1000);
+                        }, i * 1500);
+                    }
+                }
+            });
+        }
+        
+        if (!testedAny) {
+            console.log('❌ No morph targets found to test!');
+            console.log('💡 This avatar may not support facial expressions');
+        }
+        
+        return testedAny;
+    }
+
+    // COMPREHENSIVE FACIAL ANIMATION TESTING SUITE
+    
+    // Test all facial expressions at once
+    testAllExpressions() {
+        console.log('🎭 === TESTING ALL FACIAL EXPRESSIONS ===');
+        
+        if (!this.avatar || !this.avatar.morphTargets) {
+            console.log('❌ No avatar or morph targets available');
+            return;
+        }
+        
+        const allTargets = Object.keys(this.avatar.morphTargets);
+        console.log(`🎭 Total available morph targets: ${allTargets.length}`);
+        
+        // Test each category sequentially
+        this.testExpressionCategory('Eyes & Blinking', ['blink', 'eye'], 2000);
+        
+        setTimeout(() => {
+            this.testExpressionCategory('Mouth & Jaw', ['mouth', 'jaw', 'smile', 'frown'], 3000);
+        }, 2500);
+        
+        setTimeout(() => {
+            this.testExpressionCategory('Eyebrows', ['brow'], 2000);
+        }, 6000);
+        
+        setTimeout(() => {
+            this.testExpressionCategory('Cheeks & Nose', ['cheek', 'nose'], 2000);
+        }, 8500);
+        
+        return allTargets;
+    }
+    
+    testExpressionCategory(categoryName, keywords, duration = 2000) {
+        console.log(`🧪 Testing ${categoryName}...`);
+        
+        const categoryTargets = Object.keys(this.avatar.morphTargets).filter(key => 
+            keywords.some(keyword => key.toLowerCase().includes(keyword))
+        );
+        
+        console.log(`Found ${categoryTargets.length} targets for ${categoryName}:`, categoryTargets);
+        
+        // Apply all targets in this category
+        categoryTargets.forEach(target => {
+            if (this.avatar.morphTargets[target]) {
+                this.avatar.morphTargets[target].target.influence = 0.7; // 70% strength
+                console.log(`✅ Applied ${target} at 70%`);
+            }
+        });
+        
+        // Reset after duration
+        setTimeout(() => {
+            categoryTargets.forEach(target => {
+                if (this.avatar.morphTargets[target]) {
+                    this.avatar.morphTargets[target].target.influence = 0.0;
+                }
+            });
+            console.log(`🔄 Reset ${categoryName} expressions`);
+        }, duration);
+    }
+    
+    // Test mouth movements specifically
+    testMouthMovements() {
+        console.log('👄 === TESTING MOUTH MOVEMENTS ===');
+        
+        const mouthSequence = [
+            { name: 'Open mouth', targets: ['jawOpen', 'mouthOpen'], value: 0.8, duration: 1500 },
+            { name: 'Smile', targets: ['mouthSmileLeft', 'mouthSmileRight'], value: 0.9, duration: 1500 },
+            { name: 'Pucker lips', targets: ['mouthPucker'], value: 0.7, duration: 1500 },
+            { name: 'Frown', targets: ['mouthFrownLeft', 'mouthFrownRight'], value: 0.6, duration: 1500 }
+        ];
+        
+        let delay = 0;
+        mouthSequence.forEach((test, index) => {
+            setTimeout(() => {
+                console.log(`👄 ${test.name}...`);
+                
+                // Reset all mouth expressions first
+                Object.keys(this.avatar.morphTargets).forEach(key => {
+                    if (key.toLowerCase().includes('mouth') || key.toLowerCase().includes('jaw')) {
+                        this.avatar.morphTargets[key].target.influence = 0.0;
+                    }
+                });
+                
+                // Apply current test
+                test.targets.forEach(targetName => {
+                    const variations = [targetName, targetName.toLowerCase(), targetName.toUpperCase()];
+                    variations.forEach(variation => {
+                        if (this.avatar.morphTargets[variation]) {
+                            this.avatar.morphTargets[variation].target.influence = test.value;
+                            console.log(`✅ Applied ${variation} at ${(test.value * 100).toFixed(0)}%`);
+                        }
+                    });
+                });
+                
+                // Reset after duration
+                setTimeout(() => {
+                    test.targets.forEach(targetName => {
+                        const variations = [targetName, targetName.toLowerCase(), targetName.toUpperCase()];
+                        variations.forEach(variation => {
+                            if (this.avatar.morphTargets[variation]) {
+                                this.avatar.morphTargets[variation].target.influence = 0.0;
+                            }
+                        });
+                    });
+                }, test.duration);
+                
+            }, delay);
+            delay += test.duration + 200; // Small gap between tests
+        });
+        
+        console.log(`👄 Mouth test sequence will complete in ${(delay / 1000).toFixed(1)} seconds`);
+    }
+    
+    // Test eye expressions specifically  
+    testEyeExpressions() {
+        console.log('👁️ === TESTING EYE EXPRESSIONS ===');
+        
+        const eyeSequence = [
+            { name: 'Blink both eyes', targets: ['eyeBlinkLeft', 'eyeBlinkRight'], value: 1.0, duration: 800 },
+            { name: 'Blink left eye only', targets: ['eyeBlinkLeft'], value: 1.0, duration: 800 },
+            { name: 'Blink right eye only', targets: ['eyeBlinkRight'], value: 1.0, duration: 800 },
+            { name: 'Squint eyes', targets: ['eyeSquintLeft', 'eyeSquintRight'], value: 0.6, duration: 1200 }
+        ];
+        
+        let delay = 0;
+        eyeSequence.forEach((test) => {
+            setTimeout(() => {
+                console.log(`👁️ ${test.name}...`);
+                
+                // Reset all eye expressions first
+                Object.keys(this.avatar.morphTargets).forEach(key => {
+                    if (key.toLowerCase().includes('eye') || key.toLowerCase().includes('blink')) {
+                        this.avatar.morphTargets[key].target.influence = 0.0;
+                    }
+                });
+                
+                // Apply current test
+                test.targets.forEach(targetName => {
+                    const variations = [targetName, targetName.toLowerCase(), targetName.toUpperCase()];
+                    variations.forEach(variation => {
+                        if (this.avatar.morphTargets[variation]) {
+                            this.avatar.morphTargets[variation].target.influence = test.value;
+                            console.log(`✅ Applied ${variation} at ${(test.value * 100).toFixed(0)}%`);
+                        }
+                    });
+                });
+                
+                // Reset after duration
+                setTimeout(() => {
+                    test.targets.forEach(targetName => {
+                        const variations = [targetName, targetName.toLowerCase(), targetName.toUpperCase()];
+                        variations.forEach(variation => {
+                            if (this.avatar.morphTargets[variation]) {
+                                this.avatar.morphTargets[variation].target.influence = 0.0;
+                            }
+                        });
+                    });
+                }, test.duration);
+                
+            }, delay);
+            delay += test.duration + 300; // Small gap between tests
+        });
+        
+        console.log(`👁️ Eye test sequence will complete in ${(delay / 1000).toFixed(1)} seconds`);
+    }
+    
+    // Real-time facial tracking performance monitor
+    startPerformanceMonitor() {
+        console.log('📊 === STARTING FACIAL TRACKING PERFORMANCE MONITOR ===');
+        
+        if (this.performanceInterval) {
+            clearInterval(this.performanceInterval);
+            console.log('🔄 Stopped existing performance monitor');
+            return;
+        }
+        
+        let frameCount = 0;
+        let lastTime = performance.now();
+        
+        this.performanceInterval = setInterval(() => {
+            const currentTime = performance.now();
+            const deltaTime = currentTime - lastTime;
+            const fps = Math.round(1000 / deltaTime * frameCount);
+            
+            console.log('📊 FACIAL TRACKING PERFORMANCE:');
+            console.log(`   FPS: ${fps}`);
+            console.log(`   Landmarks available: ${!!this.landmarks}`);
+            console.log(`   Expressions detected: ${Object.keys(this.expressions || {}).length}`);
+            console.log(`   Active morph targets: ${this.avatar ? Object.keys(this.avatar.morphTargets || {}).length : 0}`);
+            
+            if (this.landmarks) {
+                const mouthOpen = this.calculateMouthOpenness();
+                const leftBlink = this.calculateEyeBlinkStrength('left');
+                const rightBlink = this.calculateEyeBlinkStrength('right');
+                
+                console.log(`   Current values: Mouth=${(mouthOpen*100).toFixed(1)}%, LeftBlink=${(leftBlink*100).toFixed(1)}%, RightBlink=${(rightBlink*100).toFixed(1)}%`);
+            }
+            
+            frameCount = 0;
+            lastTime = currentTime;
+        }, 2000); // Update every 2 seconds
+        
+        // Count frames
+        const countFrame = () => {
+            frameCount++;
+            if (this.performanceInterval) {
+                requestAnimationFrame(countFrame);
+            }
+        };
+        requestAnimationFrame(countFrame);
+        
+        console.log('📊 Performance monitor started. Run again to stop.');
+    }
+
+    // EASY ACCESS FUNCTIONS FOR BROWSER CONSOLE TESTING
+    
+    // Quick diagnosis function
+    diagnose() {
+        console.log('🔍 === QUICK FACIAL ANIMATION DIAGNOSIS ===');
+        
+        // 1. Check basic setup
+        console.log('✅ Step 1: Basic Setup');
+        console.log(`   Avatar loaded: ${!!this.avatar}`);
+        console.log(`   Is fallback: ${!!this.avatar?.isFallback}`);
+        console.log(`   Camera active: ${!!this.video?.srcObject}`);
+        console.log(`   Landmarks detected: ${!!this.landmarks}`);
+        
+        // 2. Check morph targets
+        console.log('✅ Step 2: Morph Targets');
+        const morphCount = Object.keys(this.avatar?.morphTargets || {}).length;
+        console.log(`   Morph targets available: ${morphCount}`);
+        
+        if (morphCount === 0) {
+            console.log('❌ PROBLEM: No morph targets found!');
+            console.log('💡 Solution: Load a Ready Player Me avatar with facial expressions');
+            return false;
+        } else {
+            console.log(`✅ Found ${morphCount} morph targets`);
+        }
+        
+        // 3. Test facial detection
+        console.log('✅ Step 3: Facial Detection');
+        if (this.landmarks) {
+            const mouthOpen = this.calculateMouthOpenness();
+            const leftBlink = this.calculateEyeBlinkStrength('left');
+            const rightBlink = this.calculateEyeBlinkStrength('right');
+            
+            console.log(`   Mouth openness: ${(mouthOpen * 100).toFixed(1)}%`);
+            console.log(`   Left eye blink: ${(leftBlink * 100).toFixed(1)}%`);
+            console.log(`   Right eye blink: ${(rightBlink * 100).toFixed(1)}%`);
+            
+            if (mouthOpen > 0 || leftBlink > 0 || rightBlink > 0) {
+                console.log('✅ Facial detection is working!');
+                console.log('💡 Try app.testMouthMovements() to test if morph targets work');
+                return true;
+            } else {
+                console.log('⚠️ No facial movement detected');
+                console.log('💡 Make sure your face is visible and try moving your mouth/eyes');
+                return false;
+            }
+        } else {
+            console.log('❌ No facial landmarks detected');
+            console.log('💡 Check camera permissions and face visibility');
+            return false;
+        }
+    }
+    
+    // Quick test function
+    test() {
+        console.log('🧪 === QUICK FACIAL EXPRESSION TEST ===');
+        
+        if (!this.avatar?.morphTargets || Object.keys(this.avatar.morphTargets).length === 0) {
+            console.log('❌ No morph targets to test');
+            console.log('💡 Run app.diagnose() first');
+            return;
+        }
+        
+        console.log('🧪 Testing mouth opening...');
+        this.testMouthMovements();
+        
+        setTimeout(() => {
+            console.log('🧪 Testing eye blinking...');
+            this.testEyeExpressions();
+        }, 7000);
+        
+        console.log('🕐 Test sequence will complete in ~15 seconds');
+    }
+    
+    // Fix common issues
+    fix() {
+        console.log('🔧 === ATTEMPTING TO FIX COMMON ISSUES ===');
+        
+        // Reset smoothing systems
+        this.blendshapeSmoothing = {};
+        this.headRotationSmoothing = { yaw: 0, pitch: 0, roll: 0 };
+        this.previousExpressions = {};
+        
+        // Clear any stuck morph targets
+        if (this.avatar?.morphTargets) {
+            Object.values(this.avatar.morphTargets).forEach(morphTarget => {
+                if (morphTarget.target) {
+                    morphTarget.target.influence = 0.0;
+                }
+            });
+            console.log('✅ Reset all morph targets to 0');
+        }
+        
+        // Reset camera validation
+        this.lastCapabilityCheck = 0;
+        this.lastMouthLogTime = 0;
+        this.lastBlinkLogTime = 0;
+        
+        console.log('✅ Reset smoothing systems');
+        console.log('✅ Cleared expression cache');
+        console.log('💡 Try app.test() to verify fixes worked');
+    }
+
+    // DISABLE ALL DEFAULT ANIMATIONS - Call this if animations restart
+    disableAllAnimations() {
+        console.log('🛑 === DISABLING ALL DEFAULT ANIMATIONS ===');
+        
+        if (!this.avatar) {
+            console.log('❌ No avatar loaded');
+            return;
+        }
+        
+        // Disable animation groups
+        if (this.avatar.animations && this.avatar.animations.length > 0) {
+            console.log(`🛑 Stopping ${this.avatar.animations.length} animation groups...`);
+            this.avatar.animations.forEach((animGroup, index) => {
+                animGroup.stop();
+                animGroup.pause();
+                animGroup.setWeightForAllAnimatables(0);
+                animGroup.speedRatio = 0;
+                console.log(`🛑 Disabled: ${animGroup.name || `Animation_${index}`}`);
+            });
+        }
+        
+        // Disable scene animatables
+        if (this.scene.animatables && this.scene.animatables.length > 0) {
+            console.log(`🛑 Stopping ${this.scene.animatables.length} scene animatables...`);
+            this.scene.animatables.forEach(animatable => {
+                animatable.stop();
+                console.log('🛑 Stopped scene animatable');
+            });
+        }
+        
+        // Reset all morph targets to neutral
+        if (this.avatar.morphTargets) {
+            console.log('🔄 Resetting all morph targets to neutral...');
+            Object.values(this.avatar.morphTargets).forEach(morphTarget => {
+                if (morphTarget.target) {
+                    morphTarget.target.influence = 0.0;
+                }
+            });
+        }
+        
+        // Reset head rotation
+        if (this.avatar.headGroup) {
+            this.avatar.headGroup.rotation = BABYLON.Vector3.Zero();
+        } else if (this.avatar.headMesh) {
+            this.avatar.headMesh.rotation = BABYLON.Vector3.Zero();
+        }
+        
+        console.log('✅ All animations disabled and avatar reset to neutral!');
+        console.log('💡 Your facial expressions should now be the only thing controlling the avatar');
+    }
+
+    // Restore normal console logging (if you need to see MediaPipe internals for debugging)
+    restoreConsoleLogs() {
+        if (this.originalConsole) {
+            console.log = this.originalConsole.log;
+            console.warn = this.originalConsole.warn;
+            console.error = this.originalConsole.error;
+            console.log('🔊 Full console logging restored (MediaPipe internals will now show)');
+        } else {
+            console.log('❌ Original console functions not available');
+        }
+    }
+
+    // Re-enable MediaPipe log suppression
+    enableLogSuppression() {
+        this.suppressMediaPipeLogs();
+    }
+
+    // DEBUG: Check mouth detection and projection pipeline
+    debugMouthPipeline() {
+        console.log('🔍 === MOUTH ANIMATION PIPELINE DEBUG ===');
+        
+        // Step 1: Check MediaPipe mouth detection
+        if (!this.landmarks) {
+            console.log('❌ Step 1 FAILED: No facial landmarks detected by MediaPipe');
+            return;
+        }
+        console.log('✅ Step 1 PASSED: MediaPipe landmarks detected');
+        
+        // Step 2: Check mouth landmark extraction
+        const mouthLandmarks = this.getMouth();
+        if (!mouthLandmarks || mouthLandmarks.length === 0) {
+            console.log('❌ Step 2 FAILED: No mouth landmarks extracted');
+            return;
+        }
+        console.log(`✅ Step 2 PASSED: ${mouthLandmarks.length} mouth landmarks extracted`);
+        console.log('📊 Sample mouth landmarks:', mouthLandmarks.slice(0, 3));
+        
+        // Step 3: Check mouth openness calculation
+        const mouthOpenness = this.calculateMouthOpenness();
+        console.log(`📏 Step 3: Mouth openness calculated = ${mouthOpenness.toFixed(3)}`);
+        if (mouthOpenness > 0.01) {
+            console.log('✅ Step 3 PASSED: Mouth openness > 0.01 (mouth likely open)');
+        } else {
+            console.log('⚠️ Step 3: Mouth openness very low (mouth likely closed)');
+        }
+        
+        // Step 4: Check expressions calculation
+        const expressions = this.expressions;
+        console.log('📊 Step 4: Expression values:');
+        console.log(`  - Happy: ${(expressions.happy || 0).toFixed(3)}`);
+        console.log(`  - Surprised: ${(expressions.surprised || 0).toFixed(3)}`);
+        console.log(`  - Neutral: ${(expressions.neutral || 0).toFixed(3)}`);
+        
+        // Step 5: Check avatar morph targets availability
+        if (!this.avatar || !this.avatar.morphTargets) {
+            console.log('❌ Step 5 FAILED: No avatar or morph targets available');
+            return;
+        }
+        
+        const morphTargetCount = Object.keys(this.avatar.morphTargets).length;
+        console.log(`✅ Step 5 PASSED: ${morphTargetCount} morph targets available`);
+        
+        // Step 6: Check mouth-specific morph targets
+        const mouthTargets = Object.keys(this.avatar.morphTargets).filter(name => 
+            name.includes('mouth') || name.includes('jaw') || name.includes('smile') || name.includes('open')
+        );
+        console.log(`👄 Step 6: Found ${mouthTargets.length} mouth-related morph targets:`);
+        mouthTargets.forEach(target => console.log(`  - ${target}`));
+        
+        if (mouthTargets.length === 0) {
+            console.log('❌ Step 6 FAILED: No mouth-related morph targets found!');
+            return;
+        }
+        
+        // Step 7: Check current morph target influences
+        console.log('📊 Step 7: Current mouth morph target influences:');
+        mouthTargets.forEach(targetName => {
+            const morphTarget = this.avatar.morphTargets[targetName];
+            if (morphTarget && morphTarget.target) {
+                const influence = morphTarget.target.influence;
+                console.log(`  - ${targetName}: ${influence.toFixed(3)}`);
+                if (influence > 0.01) {
+                    console.log(`    ✅ ${targetName} is actively influencing the model!`);
+                }
+            }
+        });
+        
+        // Step 8: Test manual morph target activation
+        console.log('🧪 Step 8: Testing manual morph target activation...');
+        const testTargets = ['jawopen', 'jawOpen', 'mouthopen', 'mouthOpen', 'mouth_open'];
+        let foundTestTarget = false;
+        
+        testTargets.forEach(testName => {
+            if (this.avatar.morphTargets[testName]) {
+                const morphTarget = this.avatar.morphTargets[testName];
+                console.log(`🧪 Testing ${testName}...`);
+                
+                // Temporarily set high influence
+                const originalInfluence = morphTarget.target.influence;
+                morphTarget.target.influence = 0.8;
+                
+                setTimeout(() => {
+                    morphTarget.target.influence = originalInfluence;
+                    console.log(`🔄 Reset ${testName} influence to ${originalInfluence}`);
+                }, 2000);
+                
+                console.log(`✅ Applied test influence to ${testName} for 2 seconds`);
+                foundTestTarget = true;
+            }
+        });
+        
+        if (!foundTestTarget) {
+            console.log('❌ Step 8 FAILED: No testable mouth morph targets found');
+        }
+        
+        console.log('🎯 PIPELINE DEBUG COMPLETE - Check above for issues!');
+    }
+
+    // DEBUG: Live mouth animation monitoring
+    startMouthMonitoring() {
+        if (this.mouthMonitoringInterval) {
+            clearInterval(this.mouthMonitoringInterval);
+        }
+        
+        console.log('👁️ Starting live mouth animation monitoring...');
+        
+        this.mouthMonitoringInterval = setInterval(() => {
+            if (!this.landmarks || !this.avatar) return;
+            
+            const mouthOpenness = this.calculateMouthOpenness();
+            const expressions = this.expressions;
+            
+            // Check for significant mouth activity
+            if (mouthOpenness > 0.05 || (expressions.happy || 0) > 0.1) {
+                console.log(`👄 MOUTH ACTIVITY: Open=${mouthOpenness.toFixed(3)}, Happy=${(expressions.happy || 0).toFixed(3)}`);
+                
+                // Check which morph targets should be active
+                const jawOpenInfluence = Math.max(mouthOpenness * 8.0, expressions.surprised * 4.0);
+                const smileInfluence = expressions.happy * 4.5;
+                
+                console.log(`🎛️ Expected influences: JawOpen=${jawOpenInfluence.toFixed(3)}, Smile=${smileInfluence.toFixed(3)}`);
+                
+                // Check actual morph target values
+                const jawTargets = ['jawopen', 'jawOpen', 'mouthopen', 'mouthOpen'];
+                const smileTargets = ['mouthsmileleft', 'mouthSmileLeft', 'mouthsmileright', 'mouthSmileRight'];
+                
+                jawTargets.forEach(target => {
+                    if (this.avatar.morphTargets[target]) {
+                        const actualInfluence = this.avatar.morphTargets[target].target.influence;
+                        console.log(`📊 ${target}: Expected=${jawOpenInfluence.toFixed(3)}, Actual=${actualInfluence.toFixed(3)}`);
+                    }
+                });
+                
+                smileTargets.forEach(target => {
+                    if (this.avatar.morphTargets[target]) {
+                        const actualInfluence = this.avatar.morphTargets[target].target.influence;
+                        console.log(`📊 ${target}: Expected=${smileInfluence.toFixed(3)}, Actual=${actualInfluence.toFixed(3)}`);
+                    }
+                });
+            }
+        }, 500); // Check every 500ms
+        
+        console.log('✅ Mouth monitoring started - open/close your mouth to see data');
+    }
+
+    // Stop mouth monitoring
+    stopMouthMonitoring() {
+        if (this.mouthMonitoringInterval) {
+            clearInterval(this.mouthMonitoringInterval);
+            this.mouthMonitoringInterval = null;
+            console.log('⏹️ Mouth monitoring stopped');
+        }
+    }
+
+    // DEBUG: Real-time mouth animation tracing
+    traceMouthAnimation() {
+        console.log('🔄 === REAL-TIME MOUTH ANIMATION TRACE ===');
+        
+        if (!this.landmarks) {
+            console.log('❌ No landmarks available for tracing');
+            return;
+        }
+        
+        // Step 1: MediaPipe mouth landmarks
+        const mouthLandmarks = this.getMouth();
+        console.log(`📍 Step 1 - Mouth Landmarks: ${mouthLandmarks.length} points detected`);
+        
+        if (mouthLandmarks.length === 0) {
+            console.log('❌ No valid mouth landmarks - stopping trace');
+            return;
+        }
+        
+        // Step 2: Mouth openness calculation
+        const rawOpenness = this.calculateMouthOpenness();
+        console.log(`📏 Step 2 - Raw Mouth Openness: ${rawOpenness.toFixed(4)}`);
+        
+        // Step 3: Expression values
+        const expressions = this.expressions;
+        console.log(`😊 Step 3 - Expression Values:`);
+        console.log(`   Happy: ${(expressions.happy || 0).toFixed(4)}`);
+        console.log(`   Surprised: ${(expressions.surprised || 0).toFixed(4)}`);
+        console.log(`   Neutral: ${(expressions.neutral || 0).toFixed(4)}`);
+        
+        // Step 4: Morph target mapping calculations
+        const jawOpenValue = Math.max(rawOpenness * 8.0, expressions.surprised * 4.0);
+        const smileLeftValue = (expressions.happy * 4.5) + this.calculateSmileAsymmetry('left');
+        const smileRightValue = (expressions.happy * 4.5) + this.calculateSmileAsymmetry('right');
+        
+        console.log(`🎛️ Step 4 - Calculated Morph Values:`);
+        console.log(`   Jaw Open: ${jawOpenValue.toFixed(4)} (from rawOpenness ${rawOpenness.toFixed(4)} * 8.0)`);
+        console.log(`   Smile Left: ${smileLeftValue.toFixed(4)}`);
+        console.log(`   Smile Right: ${smileRightValue.toFixed(4)}`);
+        
+        // Step 5: Check available morph targets
+        if (!this.avatar || !this.avatar.morphTargets) {
+            console.log('❌ No avatar or morph targets available');
+            return;
+        }
+        
+        console.log(`🎭 Step 5 - Available Morph Targets: ${Object.keys(this.avatar.morphTargets).length} total`);
+        
+        // Step 6: Check specific mouth morph targets and their current values
+        const jawTargets = ['jawopen', 'jawOpen', 'JawOpen', 'mouthopen', 'mouthOpen', 'MouthOpen', 'mouth_open'];
+        const smileTargets = ['mouthsmileleft', 'mouthSmileLeft', 'MouthSmileLeft', 'mouthsmileright', 'mouthSmileRight', 'MouthSmileRight'];
+        
+        console.log(`👄 Step 6 - Jaw/Mouth Open Targets:`);
+        let foundJawTarget = false;
+        jawTargets.forEach(targetName => {
+            if (this.avatar.morphTargets[targetName]) {
+                const currentInfluence = this.avatar.morphTargets[targetName].target.influence;
+                console.log(`   ✅ ${targetName}: Current=${currentInfluence.toFixed(4)}, Expected=${jawOpenValue.toFixed(4)}`);
+                foundJawTarget = true;
+                
+                if (Math.abs(currentInfluence - jawOpenValue) > 0.01) {
+                    console.log(`   ⚠️ MISMATCH: ${targetName} should be ${jawOpenValue.toFixed(4)} but is ${currentInfluence.toFixed(4)}`);
+                }
+            }
+        });
+        
+        if (!foundJawTarget) {
+            console.log('   ❌ NO JAW/MOUTH OPEN TARGETS FOUND!');
+            console.log('   📋 Available targets:', Object.keys(this.avatar.morphTargets).join(', '));
+        }
+        
+        console.log(`😊 Step 6 - Smile Targets:`);
+        let foundSmileTarget = false;
+        smileTargets.forEach(targetName => {
+            if (this.avatar.morphTargets[targetName]) {
+                const currentInfluence = this.avatar.morphTargets[targetName].target.influence;
+                const expectedValue = targetName.includes('left') || targetName.includes('Left') ? smileLeftValue : smileRightValue;
+                console.log(`   ✅ ${targetName}: Current=${currentInfluence.toFixed(4)}, Expected=${expectedValue.toFixed(4)}`);
+                foundSmileTarget = true;
+                
+                if (Math.abs(currentInfluence - expectedValue) > 0.01) {
+                    console.log(`   ⚠️ MISMATCH: ${targetName} should be ${expectedValue.toFixed(4)} but is ${currentInfluence.toFixed(4)}`);
+                }
+            }
+        });
+        
+        if (!foundSmileTarget) {
+            console.log('   ❌ NO SMILE TARGETS FOUND!');
+        }
+        
+        // Step 7: Manual test of jaw opening
+        console.log(`🧪 Step 7 - Manual Jaw Test (will apply 0.8 influence for 3 seconds):`);
+        const testTarget = jawTargets.find(name => this.avatar.morphTargets[name]);
+        if (testTarget) {
+            const originalInfluence = this.avatar.morphTargets[testTarget].target.influence;
+            this.avatar.morphTargets[testTarget].target.influence = 0.8;
+            console.log(`🧪 Applied 0.8 to ${testTarget} - should see jaw open!`);
+            
+            setTimeout(() => {
+                this.avatar.morphTargets[testTarget].target.influence = originalInfluence;
+                console.log(`🔄 Reset ${testTarget} to ${originalInfluence.toFixed(4)}`);
+            }, 3000);
+        } else {
+            console.log('❌ No jaw target available for manual test');
+        }
+        
+        console.log('🎯 TRACE COMPLETE - Check above for issues!');
+    }
+
+    // DEBUG: List all available morph targets
+    listMorphTargets() {
+        console.log('📋 === AVAILABLE MORPH TARGETS ===');
+        
+        if (!this.avatar || !this.avatar.morphTargets) {
+            console.log('❌ No avatar or morph targets available');
+            return;
+        }
+        
+        const morphTargets = Object.keys(this.avatar.morphTargets);
+        console.log(`🎭 Total morph targets: ${morphTargets.length}`);
+        
+        // Categorize morph targets
+        const categories = {
+            jaw: [],
+            mouth: [],
+            smile: [],
+            blink: [],
+            eye: [],
+            brow: [],
+            nose: [],
+            cheek: [],
+            other: []
+        };
+        
+        morphTargets.forEach(name => {
+            const lowerName = name.toLowerCase();
+            if (lowerName.includes('jaw') || lowerName.includes('open')) {
+                categories.jaw.push(name);
+            } else if (lowerName.includes('mouth') && !lowerName.includes('smile')) {
+                categories.mouth.push(name);
+            } else if (lowerName.includes('smile')) {
+                categories.smile.push(name);
+            } else if (lowerName.includes('blink')) {
+                categories.blink.push(name);
+            } else if (lowerName.includes('eye')) {
+                categories.eye.push(name);
+            } else if (lowerName.includes('brow')) {
+                categories.brow.push(name);
+            } else if (lowerName.includes('nose')) {
+                categories.nose.push(name);
+            } else if (lowerName.includes('cheek')) {
+                categories.cheek.push(name);
+            } else {
+                categories.other.push(name);
+            }
+        });
+        
+        // Display categorized results
+        Object.entries(categories).forEach(([category, targets]) => {
+            if (targets.length > 0) {
+                console.log(`👄 ${category.toUpperCase()}: ${targets.length} targets`);
+                targets.forEach(target => {
+                    const currentInfluence = this.avatar.morphTargets[target].target.influence;
+                    console.log(`   - ${target}: ${currentInfluence.toFixed(4)}`);
+                });
+            }
+        });
+        
+        console.log('📋 Use these exact names when debugging specific morph targets!');
+    }
+
+    // DEBUG: Test specific morph target
+    testMorphTarget(targetName, influence = 0.8, duration = 3000) {
+        if (!this.avatar || !this.avatar.morphTargets) {
+            console.log('❌ No avatar or morph targets available');
+            return;
+        }
+        
+        const morphTarget = this.avatar.morphTargets[targetName];
+        if (!morphTarget) {
+            console.log(`❌ Morph target "${targetName}" not found`);
+            console.log('📋 Available targets:', Object.keys(this.avatar.morphTargets).join(', '));
+            return;
+        }
+        
+        const originalInfluence = morphTarget.target.influence;
+        morphTarget.target.influence = influence;
+        
+        console.log(`🧪 Testing "${targetName}" with influence ${influence} for ${duration}ms`);
+        console.log(`   Original influence: ${originalInfluence.toFixed(4)}`);
+        console.log(`   Test influence: ${influence}`);
+        
+        setTimeout(() => {
+            morphTarget.target.influence = originalInfluence;
+            console.log(`🔄 Reset "${targetName}" to ${originalInfluence.toFixed(4)}`);
+        }, duration);
     }
 
     smoothBlendshape(shapeName, targetValue) {

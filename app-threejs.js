@@ -208,7 +208,7 @@ class FacePuppetApp {
             this.controls.enableDamping = true;
             this.controls.dampingFactor = 0.05;
             this.controls.minDistance = 1;
-            this.controls.maxDistance = 10;
+            this.controls.maxDistance = 40; // Increased from 20 to 40 for maximum zoom out
             this.controls.enablePan = true;
             this.controls.enableZoom = true;
             this.controls.enableRotate = true;
